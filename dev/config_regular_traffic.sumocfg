@@ -13,8 +13,8 @@
     <processing>
         <threads value="4"/>
         <collision.action value="warn"/>
-        <time-to-teleport value="300"/>
-        <max-depart-delay value="900"/>
+        <time-to-teleport value="60"/>
+        <max-depart-delay value="300"/>
     </processing>
     <report>
         <verbose value="true"/>

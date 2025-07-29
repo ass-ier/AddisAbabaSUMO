@@ -2,19 +2,19 @@
 <configuration>
     <input>
         <net-file value="/Volumes/PortableSSD/Senior Project/AddisAbabaSumo/AddisAbaba.net.xml"/>
-        <route-files value="trips_evening_rush.xml"/>
+        <route-files value="simple_congestion_trips.xml"/>
         <additional-files value="vehicle_types.xml"/>
     </input>
     <time>
         <begin value="0"/>
-        <end value="7200"/>
+        <end value="1200"/>
         <step-length value="1.0"/>
     </time>
     <processing>
         <threads value="4"/>
         <collision.action value="warn"/>
-        <time-to-teleport value="60"/>
-        <max-depart-delay value="300"/>
+        <time-to-teleport value="30"/>
+        <max-depart-delay value="60"/>
     </processing>
     <report>
         <verbose value="true"/>
@@ -22,14 +22,14 @@
     </report>
     <gui_only>
         <start value="0"/>
-        <delay value="50"/>
+        <delay value="20"/>
     </gui_only>
     <random_number>
         <seed value="42"/>
     </random_number>
     <output>
-        <summary value="summary_evening_rush.xml"/>
-        <tripinfo value="tripinfo_evening_rush.xml"/>
-        <fcd-output value="fcd_evening_rush.xml"/>
+        <summary value="simple_summary.xml"/>
+        <tripinfo value="simple_tripinfo.xml"/>
+        <fcd-output value="simple_fcd.xml"/>
     </output>
-</configuration>
+</configuration> 

@@ -77,7 +77,7 @@ class SeparateTrafficVariations:
                 'start_hour': 7,
                 'end_hour': 9,
                 'duration_hours': 2,
-                'intensity': 2.5,
+                'intensity': 5.0,
                 'description': '7:00 AM - 9:00 AM (Peak morning traffic)'
             },
             'evening_rush': {
@@ -85,7 +85,7 @@ class SeparateTrafficVariations:
                 'start_hour': 17,
                 'end_hour': 19,
                 'duration_hours': 2,
-                'intensity': 2.5,
+                'intensity': 5.0,
                 'description': '5:00 PM - 7:00 PM (Peak evening traffic)'
             },
             'regular_traffic': {
@@ -93,7 +93,7 @@ class SeparateTrafficVariations:
                 'start_hour': 10,
                 'end_hour': 16,
                 'duration_hours': 6,
-                'intensity': 1.0,
+                'intensity': 3.0,
                 'description': '10:00 AM - 4:00 PM (Normal traffic conditions)'
             }
         }
@@ -181,7 +181,7 @@ class SeparateTrafficVariations:
         
         return pairs
     
-    def generate_variation_trips(self, variation_name, trips_per_hour=2000):
+    def generate_variation_trips(self, variation_name, trips_per_hour=8000):
         """Generate trips for a specific traffic variation"""
         if not self.edges:
             print("❌ No edges available. Cannot generate trips.")
@@ -216,8 +216,12 @@ class SeparateTrafficVariations:
                 vehicle_type = self.generate_vehicle_type(variation_name)
                 vehicle_config = self.vehicle_types[vehicle_type]
                 
-                # Generate departure time within this hour (in seconds)
+                # Generate departure time within this hour (in seconds) - more frequent departures
                 depart_time = (current_hour * 3600) + random.randint(0, 3599)
+                
+                # Ensure departure time is within simulation duration (0-7200 seconds for 2 hours)
+                if depart_time >= 7200:
+                    depart_time = random.randint(0, 7199)
                 
                 # Create trip entry
                 trip = {
@@ -231,6 +235,23 @@ class SeparateTrafficVariations:
                 
                 trips.append(trip)
                 trip_id += 1
+                
+                # Add additional trips for higher density (every 2-5 seconds)
+                if random.random() < 0.3:  # 30% chance of additional vehicle
+                    additional_depart = depart_time + random.randint(2, 5)
+                    
+                    # Ensure additional departure time is within simulation duration
+                    if additional_depart < 7200:
+                        additional_trip = {
+                            'id': f"trip_{variation_name}_{vehicle_type}_{trip_id}_add",
+                            'from': src,
+                            'to': dst,
+                            'depart': additional_depart,
+                            'type': vehicle_type,
+                            'vehicle_class': vehicle_config['name']
+                        }
+                        trips.append(additional_trip)
+                        trip_id += 1
         
         return trips
     
@@ -274,8 +295,8 @@ class SeparateTrafficVariations:
             f.write('    <processing>\n')
             f.write('        <threads value="4"/>\n')
             f.write('        <collision.action value="warn"/>\n')
-            f.write('        <time-to-teleport value="300"/>\n')
-            f.write('        <max-depart-delay value="900"/>\n')
+            f.write('        <time-to-teleport value="60"/>\n')
+            f.write('        <max-depart-delay value="300"/>\n')
             f.write('    </processing>\n')
             f.write('    <report>\n')
             f.write('        <verbose value="true"/>\n')

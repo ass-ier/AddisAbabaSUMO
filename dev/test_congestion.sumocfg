@@ -2,12 +2,12 @@
 <configuration>
     <input>
         <net-file value="/Volumes/PortableSSD/Senior Project/AddisAbabaSumo/AddisAbaba.net.xml"/>
-        <route-files value="trips_evening_rush.xml"/>
+        <route-files value="test_trips.xml"/>
         <additional-files value="vehicle_types.xml"/>
     </input>
     <time>
         <begin value="0"/>
-        <end value="7200"/>
+        <end value="3600"/>
         <step-length value="1.0"/>
     </time>
     <processing>
@@ -28,8 +28,8 @@
         <seed value="42"/>
     </random_number>
     <output>
-        <summary value="summary_evening_rush.xml"/>
-        <tripinfo value="tripinfo_evening_rush.xml"/>
-        <fcd-output value="fcd_evening_rush.xml"/>
+        <summary value="test_summary.xml"/>
+        <tripinfo value="test_tripinfo.xml"/>
+        <fcd-output value="test_fcd.xml"/>
     </output>
-</configuration>
+</configuration> 
