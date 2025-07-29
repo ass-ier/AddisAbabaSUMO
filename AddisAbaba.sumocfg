@@ -1,0 +1,11 @@
+<configuration>
+    <input>
+        <net-file value="AddisAbaba.net.xml"/>
+        <route-files value="routes.xml"/>
+    </input>
+    <time>
+        <begin value="0"/>
+        <end value="10800"/> <!-- simulation duration in seconds -->
+        <step-length value="1.0"/>
+    </time>
+</configuration>
