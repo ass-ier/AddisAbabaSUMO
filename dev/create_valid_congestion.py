@@ -6,6 +6,28 @@ Valid Congestion Generator - Uses only connected edges that allow departures
 import random
 import xml.etree.ElementTree as ET
 
+def check_edge_allows_vehicle(edge_id, vehicle_type, edges):
+    """Check if an edge allows a specific vehicle type"""
+    if edge_id not in edges:
+        return False
+    
+    edge = edges[edge_id]
+    for lane in edge.findall('.//lane'):
+        allow = lane.get('allow', '')
+        disallow = lane.get('disallow', '')
+        
+        # Check if this lane allows the vehicle type
+        if vehicle_type == 'personal' or vehicle_type == 'taxi':
+            # Personal vehicles and taxis need passenger permission
+            if ('passenger' in allow or allow == '' or allow == 'all') and 'passenger' not in disallow:
+                return True
+        elif vehicle_type == 'motorcycle':
+            # Motorcycles need motorcycle permission
+            if ('motorcycle' in allow or allow == '' or allow == 'all') and 'motorcycle' not in disallow:
+                return True
+    
+    return False
+
 def create_valid_congestion():
     """Create congestion using only connected edges that allow departures"""
     
@@ -104,32 +126,36 @@ def create_valid_congestion():
                 # Random vehicle type
                 vtype = random.choice(vehicle_types)
                 
-                # Departure time - spread across first 200 seconds
-                depart_time = random.randint(0, 200)
-                
-                trip = {
-                    'id': f"valid_trip_{trip_id}",
-                    'from': start_edge,
-                    'to': end_edge,
-                    'depart': depart_time,
-                    'type': vtype
-                }
-                
-                trips.append(trip)
-                trip_id += 1
-                
-                # Add additional vehicles for congestion (30% chance)
-                if random.random() < 0.3:
-                    additional_depart = depart_time + random.randint(1, 3)
-                    additional_trip = {
-                        'id': f"valid_trip_{trip_id}_add",
+                # Check if both start and end edges allow this vehicle type
+                if (check_edge_allows_vehicle(start_edge, vtype, edges) and 
+                    check_edge_allows_vehicle(end_edge, vtype, edges)):
+                    
+                    # Departure time - spread across first 200 seconds
+                    depart_time = random.randint(0, 200)
+                    
+                    trip = {
+                        'id': f"valid_trip_{trip_id}",
                         'from': start_edge,
                         'to': end_edge,
-                        'depart': additional_depart,
+                        'depart': depart_time,
                         'type': vtype
                     }
-                    trips.append(additional_trip)
+                    
+                    trips.append(trip)
                     trip_id += 1
+                    
+                    # Add additional vehicles for congestion (30% chance)
+                    if random.random() < 0.3:
+                        additional_depart = depart_time + random.randint(1, 3)
+                        additional_trip = {
+                            'id': f"valid_trip_{trip_id}_add",
+                            'from': start_edge,
+                            'to': end_edge,
+                            'depart': additional_depart,
+                            'type': vtype
+                        }
+                        trips.append(additional_trip)
+                        trip_id += 1
     
     # Sort trips by departure time
     trips.sort(key=lambda x: x['depart'])
