@@ -133585,10 +133585,10 @@
   "vehicle_trips": [],
   "signal_phases": {},
   "congestion_metrics": {
-    "average_delay": 347,
-    "queue_length": 108,
-    "throughput": 0.6689976760562688,
+    "average_delay": 514,
+    "queue_length": 104,
+    "throughput": 0.6777334647337256,
     "level_of_service": "F",
-    "spillback_probability": 0.4140476246952331
+    "spillback_probability": 0.5195670438304558
   }
 }

@@ -1,0 +1,14 @@
+{
+  "total_trips": 4250,
+  "time_periods": 10,
+  "vehicle_distribution": {
+    "private_car": 0.75,
+    "minibus": 0.15,
+    "truck": 0.08,
+    "bus": 0.02
+  },
+  "edges_used": 100,
+  "simulation_duration": 36000,
+  "congestion_level": "LOS E-F",
+  "adaptive_control_ready": true
+}

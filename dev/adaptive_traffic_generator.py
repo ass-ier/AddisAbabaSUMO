@@ -305,11 +305,7 @@ class AdaptiveTrafficGenerator:
             f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
             f.write('<routes>\n')
             
-            # Write vehicle types
-            for vtype, params in self.vehicle_types.items():
-                f.write(f'    <vType id="{vtype}" length="{params["length"]}" maxSpeed="{params["max_speed"]}"/>\n')
-            
-            # Write trips
+            # Write trips (vehicle types are defined in separate file)
             for trip in traffic_data['vehicle_trips']:
                 f.write(f'    <trip id="{trip["id"]}" from="{trip["from_edge"]}" to="{trip["to_edge"]}" ')
                 f.write(f'depart="{trip["departure_time"]}" type="{trip["vehicle_type"]}"/>\n')
