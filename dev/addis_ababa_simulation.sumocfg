@@ -8,7 +8,7 @@
         <route-files value="enhanced_trips.xml"/>
         
         <!-- Vehicle type definitions -->
-        <vtype-files value="vehicle_types.xml"/>
+        <additional-files value="vehicle_types.xml"/>
     </input>
 
     <time>
@@ -36,21 +36,9 @@
         
         <!-- Departure settings -->
         <max-depart-delay value="900"/>
-        <departlane value="free"/>
-        <departpos value="base"/>
-        <departspeed value="max"/>
     </processing>
 
-    <routing>
-        <!-- Routing algorithm -->
-        <algorithm value="dijkstra"/>
-        
-        <!-- Route file output -->
-        <route-files value="output_routes.xml"/>
-        
-        <!-- Trip info output -->
-        <tripinfo-files value="tripinfo.xml"/>
-    </routing>
+
 
     <report>
         <!-- Verbose output -->
@@ -79,33 +67,12 @@
         <seed value="42"/>
     </random_number>
 
-    <tls>
-        <!-- Traffic light settings -->
-        <cycle.time value="90"/>
-        <yellow.time value="3"/>
-        <allred.time value="2"/>
-    </tls>
 
-    <pedestrian>
-        <!-- Pedestrian model -->
-        <model value="striping"/>
-        <stripe-width value="0.8"/>
-    </pedestrian>
-
-    <emergency>
-        <!-- Emergency vehicle behavior -->
-        <blocking.time value="300"/>
-        <jam-threshold value="10"/>
-    </emergency>
 
     <output>
         <!-- Output files -->
         <summary value="summary.xml"/>
         <tripinfo value="tripinfo.xml"/>
-        <vehroute value="vehroute.xml"/>
         <fcd-output value="fcd.xml"/>
-        <queue-output value="queue.xml"/>
-        <vtk-output value="vtk_output"/>
-        <amitran value="amitran.xml"/>
     </output>
 </configuration>
