@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <input>
+        <net-file value="/Volumes/PortableSSD/Senior Project/AddisAbabaSumo/AddisAbaba.net.xml"/>
+        <additional-files value="/Volumes/PortableSSD/Senior Project/AddisAbabaSumo/dev/adaptive_vehicle_types.xml"/>
+        <route-files value="/Volumes/PortableSSD/Senior Project/AddisAbabaSumo/dev/research_traffic_routes.xml"/>
+    </input>
+    
+    <time>
+        <begin value="0"/>
+        <end value="3600"/>
+        <step-length value="1"/>
+    </time>
+    
+    <processing>
+        <ignore-route-errors value="false"/>
+        <time-to-teleport value="120"/>
+        <max-depart-delay value="300"/>
+        <collision.action value="warn"/>
+        <collision.check-junctions value="true"/>
+    </processing>
+    
+    <report>
+        <tripinfo-output value="research_traffic_tripinfo.xml"/>
+        <summary-output value="research_traffic_summary.xml"/>
+        <fcd-output value="research_traffic_fcd.xml"/>
+        <queue-output value="research_traffic_queues.xml"/>
+    </report>
+    
+    <gui_only>
+        <gui-settings-file value=""/>
+        <quit-on-end value="false"/>
+        <delay value="50"/>
+        <no-step-log value="false"/>
+    </gui_only>
+    
+    <routing>
+        <device.rerouting.probability value="0.1"/>
+        <device.rerouting.explicit value="true"/>
+        <device.rerouting.deterministic value="false"/>
+    </routing>
+</configuration> 
