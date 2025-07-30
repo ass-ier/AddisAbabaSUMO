@@ -82,6 +82,9 @@ def create_congested_test():
             trips.append(additional_trip)
             trip_id += 1
     
+    # Sort trips by departure time before writing
+    trips.sort(key=lambda x: x['depart'])
+    
     # Write to XML file
     with open("congested_test_trips.xml", "w") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')

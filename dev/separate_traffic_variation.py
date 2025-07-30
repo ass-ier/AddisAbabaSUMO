@@ -259,6 +259,9 @@ class SeparateTrafficVariations:
         """Write trips to XML file for specific variation"""
         filename = f"trips_{variation_name}.xml"
         
+        # Sort trips by departure time before writing
+        trips.sort(key=lambda x: x['depart'])
+        
         with open(filename, "w") as f:
             f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
             f.write('<trips>\n')
