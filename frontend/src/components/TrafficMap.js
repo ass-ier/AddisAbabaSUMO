@@ -186,14 +186,23 @@ const MapController = ({ intersections, lanes, geoBounds }) => {
   return null;
 };
 
-// Fit helper for SUMO bounds
+// Fit helper for SUMO bounds (guarded to avoid repeated fits/loops)
 const FitBoundsController = ({ bounds }) => {
   const map = useMap();
+  const fittedKeyRef = useRef(null);
   useEffect(() => {
-    if (bounds) {
-      map.fitBounds(bounds, { padding: [20, 20] });
+    if (!map || !bounds) return;
+    try {
+      const sw = bounds.getSouthWest();
+      const ne = bounds.getNorthEast();
+      const key = `${sw.lat},${sw.lng},${ne.lat},${ne.lng}`;
+      if (fittedKeyRef.current === key) return;
+      map.fitBounds(bounds, { padding: [20, 20], maxZoom: 20 });
+      fittedKeyRef.current = key;
+    } catch (_) {
+      // ignore fit errors
     }
-  }, [bounds, map]);
+  }, [map, bounds]);
   return null;
 };
 
@@ -626,9 +635,8 @@ const TrafficMap = () => {
       title="Traffic Map"
       subtitle="Real-time traffic visualization and monitoring"
     >
-      <div className="traffic-map-container">
-        {/* Map Controls */}
-        <div className="map-controls">
+      {/* Top Controls (moved outside container) */}
+      <div className="map-controls">
           <div className="control-group">
             <label>View Mode:</label>
             <select
@@ -657,6 +665,37 @@ const TrafficMap = () => {
                 onClick={() => loadSumoNetLocal()}
               >
                 Load SUMO Net (local)
+              </button>
+            </div>
+          </div>
+
+          {/* Simulation Controls moved from sidebar */}
+          <div className="control-group">
+            <label>Simulation</label>
+            <div className="action-buttons">
+              <button
+                className="action-btn primary"
+                onClick={() => api.sumoControl("start_simulation").catch(() => {})}
+              >
+                ▶️ Start
+              </button>
+              <button
+                className="action-btn secondary"
+                onClick={() => api.sumoControl("pause_simulation").catch(() => {})}
+              >
+                ⏸️ Pause
+              </button>
+              <button
+                className="action-btn secondary"
+                onClick={() => api.sumoControl("resume_simulation").catch(() => {})}
+              >
+                ▶️ Resume
+              </button>
+              <button
+                className="action-btn secondary"
+                onClick={() => api.sumoControl("stop_simulation").catch(() => {})}
+              >
+                ⏹️ Stop
               </button>
             </div>
           </div>
@@ -713,8 +752,24 @@ const TrafficMap = () => {
           )}
         </div>
 
+      {/* Quick Top Stats */}
+      <div className="top-stats">
+        <div className="kpi">
+          <span className="kpi-label">Total Intersections</span>
+          <span className="kpi-value">{mapData.intersections.length}</span>
+        </div>
+        <div className="kpi">
+          <span className="kpi-label">Congested</span>
+          <span className="kpi-value">
+            {mapData.intersections.filter((i) => i.status === "congested").length}
+          </span>
+        </div>
+      </div>
+
+      <div className="traffic-map-container">
+
         {/* Map Container */}
-        <div className="map-wrapper">
+        <div className="map-wrapper" style={{ width: "100%" }}>
           {sumoNetMode ? (
             <MapContainer
               key="sumo-net"
@@ -973,161 +1028,12 @@ const TrafficMap = () => {
             </div>
           )}
         </div>
+      </div>
 
-        {/* Side Panel */}
-        <div className="map-sidebar">
-          <div className="sidebar-section">
-            <h3>Simulation</h3>
-            <div className="action-buttons">
-              <button
-                className="action-btn primary"
-                onClick={() =>
-                  api.sumoControl("start_simulation").catch(() => {})
-                }
-              >
-                ▶️ Start
-              </button>
-              <button
-                className="action-btn"
-                onClick={() =>
-                  api.sumoControl("pause_simulation").catch(() => {})
-                }
-              >
-                ⏸️ Pause
-              </button>
-              <button
-                className="action-btn"
-                onClick={() =>
-                  api.sumoControl("resume_simulation").catch(() => {})
-                }
-              >
-                ▶️ Resume
-              </button>
-              <button
-                className="action-btn danger"
-                onClick={() =>
-                  api.sumoControl("stop_simulation").catch(() => {})
-                }
-              >
-                ⏹️ Stop
-              </button>
-            </div>
-          </div>
-          <div className="sidebar-section">
-            <h3>Data Source</h3>
-            <div className="action-buttons">
-              <button
-                className={`action-btn ${
-                  dataMode === "simulation" ? "primary" : "secondary"
-                }`}
-                onClick={() => {
-                  setDataMode("simulation");
-                  api.updateMapSettings({ mode: "simulation" }).catch(() => {});
-                }}
-              >
-                Simulation Mode
-              </button>
-              <button
-                className={`action-btn ${
-                  dataMode === "real" ? "primary" : "secondary"
-                }`}
-                onClick={() => {
-                  setDataMode("real");
-                  api.updateMapSettings({ mode: "real" }).catch(() => {});
-                }}
-              >
-                Real Data Mode
-              </button>
-            </div>
-          </div>
-          <div className="sidebar-section">
-            <h3>Area Filter</h3>
-            <div className="detail-grid">
-              <div className="detail-item">
-                <span>Min Lat</span>
-                <span>{areaBbox.minLat.toFixed(4)}</span>
-              </div>
-              <div className="detail-item">
-                <span>Min Lon</span>
-                <span>{areaBbox.minLon.toFixed(4)}</span>
-              </div>
-              <div className="detail-item">
-                <span>Max Lat</span>
-                <span>{areaBbox.maxLat.toFixed(4)}</span>
-              </div>
-              <div className="detail-item">
-                <span>Max Lon</span>
-                <span>{areaBbox.maxLon.toFixed(4)}</span>
-              </div>
-            </div>
-            <div className="action-buttons">
-              <button
-                className="action-btn secondary"
-                onClick={() =>
-                  api
-                    .updateMapSettings({ bbox: areaBbox })
-                    .then(() =>
-                      window.dispatchEvent(
-                        new CustomEvent("notify", {
-                          detail: {
-                            type: "success",
-                            message: "Applied area filter",
-                          },
-                        })
-                      )
-                    )
-                    .catch(() =>
-                      window.dispatchEvent(
-                        new CustomEvent("notify", {
-                          detail: {
-                            type: "error",
-                            message: "Failed to apply area filter",
-                          },
-                        })
-                      )
-                    )
-                }
-              >
-                Apply Filter
-              </button>
-              <button
-                className="action-btn secondary"
-                onClick={() => {
-                  const addis = {
-                    minLat: 8.85,
-                    minLon: 38.6,
-                    maxLat: 9.15,
-                    maxLon: 38.9,
-                  };
-                  setAreaBbox(addis);
-                  api.updateMapSettings({ bbox: addis }).catch(() => {});
-                }}
-              >
-                Reset Addis
-              </button>
-              <button
-                className="action-btn primary"
-                onClick={() => {
-                  // Ayat (~9.043, 38.866) to Megenagna (~9.019, 38.810) corridor
-                  const ayatMegenagna = {
-                    minLat: 9.0,
-                    minLon: 38.8,
-                    maxLat: 9.08,
-                    maxLon: 38.885,
-                  };
-                  setAreaBbox(ayatMegenagna);
-                  api
-                    .updateMapSettings({ bbox: ayatMegenagna })
-                    .catch(() => {});
-                }}
-              >
-                Ayat – Megenagna
-              </button>
-            </div>
-          </div>
-          <div className="sidebar-section">
-            <h3>Traffic Summary</h3>
-            <div className="summary-stats">
+      {/* Bottom Info (Traffic Summary + Legend) */}
+      <div style={{ width: "100%", marginTop: 12 }}>
+        <div className="card shadow-card" style={{ padding: 12 }}>
+          <div className="summary-stats">
               <div className="stat-item">
                 <span className="stat-label">Total Intersections:</span>
                 <span className="stat-value">
@@ -1138,9 +1044,7 @@ const TrafficMap = () => {
                 <span className="stat-label">Congested:</span>
                 <span className="stat-value" style={{ color: "#F44336" }}>
                   {
-                    mapData.intersections.filter(
-                      (i) => i.status === "congested"
-                    ).length
+                    mapData.intersections.filter((i) => i.status === "congested").length
                   }
                 </span>
               </div>
@@ -1151,94 +1055,26 @@ const TrafficMap = () => {
                 </span>
               </div>
             </div>
-          </div>
-
-          {selectedIntersection && (
-            <div className="sidebar-section">
-              <h3>Selected Intersection</h3>
-              <div className="intersection-details">
-                <h4>{selectedIntersection.name}</h4>
-                <div className="detail-grid">
-                  <div className="detail-item">
-                    <span>Status:</span>
-                    <span className={`status-${selectedIntersection.status}`}>
-                      {selectedIntersection.status}
-                    </span>
-                  </div>
-                  <div className="detail-item">
-                    <span>Queue Length:</span>
-                    <span>{selectedIntersection.queueLength} vehicles</span>
-                  </div>
-                  <div className="detail-item">
-                    <span>Signal State:</span>
-                    <span
-                      className={`signal-${selectedIntersection.signalState}`}
-                    >
-                      {selectedIntersection.signalState}
-                    </span>
-                  </div>
-                  <div className="detail-item">
-                    <span>Congestion:</span>
-                    <span
-                      style={{
-                        color: getCongestionColor(
-                          selectedIntersection.congestion
-                        ),
-                      }}
-                    >
-                      {selectedIntersection.congestion}
-                    </span>
-                  </div>
-                </div>
-                {canManualOverride && (
-                  <div className="action-buttons">
-                    <button
-                      className="action-btn primary"
-                      onClick={() => manualOverride(selectedIntersection)}
-                    >
-                      Manual Override
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="sidebar-section">
-            <h3>Legend</h3>
-            <div className="legend">
+            <div className="legend" style={{ marginTop: 12 }}>
               <div className="legend-item">
-                <div
-                  className="legend-color"
-                  style={{ background: "#4CAF50" }}
-                ></div>
+                <div className="legend-color" style={{ background: "#4CAF50" }}></div>
                 <span>Normal Traffic</span>
               </div>
               <div className="legend-item">
-                <div
-                  className="legend-color"
-                  style={{ background: "#FF9800" }}
-                ></div>
+                <div className="legend-color" style={{ background: "#FF9800" }}></div>
                 <span>Congested</span>
               </div>
               <div className="legend-item">
-                <div
-                  className="legend-color"
-                  style={{ background: "#F44336" }}
-                ></div>
+                <div className="legend-color" style={{ background: "#F44336" }}></div>
                 <span>Critical</span>
               </div>
               <div className="legend-item">
-                <div
-                  className="legend-color"
-                  style={{ background: "#9C27B0" }}
-                ></div>
+                <div className="legend-color" style={{ background: "#9C27B0" }}></div>
                 <span>Emergency</span>
               </div>
             </div>
           </div>
         </div>
-      </div>
     </PageLayout>
   );
 };

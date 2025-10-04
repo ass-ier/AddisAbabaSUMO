@@ -1,9 +1,9 @@
 /* TrafficMap.css */
 .traffic-map-container {
-  display: flex;
+  position: relative;
+  display: block;
   height: calc(100vh - 200px);
   min-height: 600px;
-  gap: 16px;
   background: #f8f9fa;
   border-radius: 12px;
   overflow: hidden;
@@ -12,11 +12,8 @@
 
 /* Map Controls */
 .map-controls {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  right: 16px;
-  z-index: 1000;
+  position: static;
+  z-index: 10;
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
@@ -96,11 +93,12 @@
 
 /* Map Wrapper */
 .map-wrapper {
-  flex: 1;
+  width: 100%;
   position: relative;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+  height: calc(100vh - 260px);
 }
 
 /* Custom Traffic Icons */
@@ -151,6 +149,13 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   font-size: 12px;
   color: #1f2937;
+}
+
+/* Top stats bar under controls */
+.top-stats {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 /* KPIs overlay */
@@ -298,17 +303,8 @@
   color: #6b7280;
 }
 
-/* Sidebar */
-.map-sidebar {
-  width: 320px;
-  background: white;
-  padding: 20px;
-  overflow-y: auto;
-  border-left: 1px solid #e5e7eb;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+/* Sidebar removed in full-width layout */
+.map-sidebar { display: none; }
 
 .sidebar-section {
   background: #ffffff;
@@ -475,7 +471,6 @@
 /* Responsive Design */
 @media (max-width: 1024px) {
   .traffic-map-container {
-    flex-direction: column;
     height: auto;
   }
 
