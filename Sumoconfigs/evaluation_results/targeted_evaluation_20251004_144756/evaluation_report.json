@@ -1,0 +1,62 @@
+{
+  "evaluation_info": {
+    "timestamp": "2025-10-04T14:49:58.609254",
+    "model_path": "C:\\Users\\bamim\\Desktop\\AddisAbabaSUMO\\experiments\\targeted_addis_ppo_20251003_031746\\models\\best_model\\best_model",
+    "target_tls": [
+      "megenagna",
+      "abem",
+      "salitemihret",
+      "shola1",
+      "shola2",
+      "bolebrass",
+      "tikuranbesa"
+    ],
+    "episodes_per_method": 1,
+    "episode_duration_minutes": 20.0
+  },
+  "rl_results": [
+    {
+      "episode": 1,
+      "episode_reward": 64.07301587301589,
+      "total_waiting_time": 0.0,
+      "total_throughput": 0.0,
+      "steps": 80,
+      "avg_waiting_per_step": 0.0,
+      "avg_throughput_per_step": 0.0,
+      "emergency_switches": 66,
+      "simulation_time_minutes": 20.0
+    }
+  ],
+  "fixed_time_results": [
+    {
+      "episode_reward": 46.844444444444434,
+      "total_waiting_time": 0.0,
+      "total_throughput": 0.0,
+      "steps": 80,
+      "avg_waiting_per_step": 0.0,
+      "avg_throughput_per_step": 0.0,
+      "episode": 1,
+      "simulation_time_minutes": 20.0
+    }
+  ],
+  "comparison": {
+    "rl_averages": {
+      "episode_reward": 64.07301587301589,
+      "avg_waiting_per_step": 0.0,
+      "avg_throughput_per_step": 0.0,
+      "emergency_switches": 66.0
+    },
+    "fixed_averages": {
+      "episode_reward": 46.844444444444434,
+      "avg_waiting_per_step": 0.0,
+      "avg_throughput_per_step": 0.0
+    },
+    "improvements": {
+      "reward_improvement_pct": 36.77825969097323,
+      "waiting_improvement_pct": 0,
+      "throughput_improvement_pct": 0
+    },
+    "statistical_test": {
+      "t_statistic": NaN,
+      "p_value": NaN,
+      "is_significant": 

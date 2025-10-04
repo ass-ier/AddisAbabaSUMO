@@ -1,0 +1,54 @@
+{
+  "episode_seconds": 1200,
+  "total_timesteps": 300000,
+  "eval_freq": 10000,
+  "n_eval_episodes": 2,
+  "save_freq": 25000,
+  "learning_rate": 0.0005,
+  "n_steps": 512,
+  "batch_size": 64,
+  "n_epochs": 8,
+  "gamma": 0.98,
+  "gae_lambda": 0.95,
+  "clip_range": 0.2,
+  "ent_coef": 0.05,
+  "vf_coef": 0.5,
+  "max_grad_norm": 0.5,
+  "baseline_results": {
+    "episode_reward": 45.13015873015871,
+    "total_waiting_time": 0.0,
+    "total_throughput": 0.0,
+    "avg_waiting_per_step": 0.0,
+    "avg_throughput_per_step": 0.0,
+    "episodes": 3,
+    "individual_results": [
+      {
+        "episode_reward": 45.13015873015871,
+        "total_waiting_time": 0.0,
+        "total_throughput": 0.0,
+        "steps": 80,
+        "avg_waiting_per_step": 0.0,
+        "avg_throughput_per_step": 0.0
+      },
+      {
+        "episode_reward": 45.13015873015871,
+        "total_waiting_time": 0.0,
+        "total_throughput": 0.0,
+        "steps": 80,
+        "avg_waiting_per_step": 0.0,
+        "avg_throughput_per_step": 0.0
+      },
+      {
+        "episode_reward": 45.13015873015871,
+        "total_waiting_time": 0.0,
+        "total_throughput": 0.0,
+        "steps": 80,
+        "avg_waiting_per_step": 0.0,
+        "avg_throughput_per_step": 0.0
+      }
+    ]
+  },
+  "experiment_dir": "experiments/targeted_addis_ppo_20251003_031746",
+  "device": "cuda",
+  "timestamp": "20251003_031746"
+}

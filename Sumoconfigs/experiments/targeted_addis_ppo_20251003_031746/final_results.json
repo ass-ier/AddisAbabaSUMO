@@ -1,0 +1,12 @@
+{
+  "final_reward": 63.001587301587335,
+  "final_avg_waiting": 0.0,
+  "final_avg_throughput": 0.0,
+  "baseline_reward": 45.13015873015871,
+  "baseline_waiting": 0.0,
+  "baseline_throughput": 0.0,
+  "reward_improvement_pct": 39.59974676420947,
+  "waiting_improvement_pct": 0,
+  "throughput_improvement_pct": 0,
+  "training_duration_minutes": 2110.5988939166664
+}

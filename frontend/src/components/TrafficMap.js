@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -14,6 +14,7 @@ import "./TrafficMap.css";
 import io from "socket.io-client";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../utils/api";
+import { parseSumoNetXml } from "../utils/sumoNetParser";
 // Optional clustering: keep footprint tiny without extra deps by grouping by grid
 
 // Fix for default markers in react-leaflet
@@ -185,6 +186,17 @@ const MapController = ({ intersections, lanes, geoBounds }) => {
   return null;
 };
 
+// Fit helper for SUMO bounds
+const FitBoundsController = ({ bounds }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (bounds) {
+      map.fitBounds(bounds, { padding: [20, 20] });
+    }
+  }, [bounds, map]);
+  return null;
+};
+
 const TrafficMap = () => {
   const [mapData, setMapData] = useState({
     intersections: [],
@@ -210,6 +222,35 @@ const TrafficMap = () => {
   const socketRef = useRef(null);
   const { user } = useAuth();
   const [showDensity, setShowDensity] = useState(true);
+
+  // SUMO Net (client-side .net.xml) view state
+  const [sumoNetMode, setSumoNetMode] = useState(false);
+  const [sumoNetData, setSumoNetData] = useState({ lanes: [], bounds: null });
+  const sumoMapRef = useRef(null);
+
+  // Derive leaflet bounds from file bounds or from lane points if absent
+  const sumoBounds = useMemo(() => {
+    if (sumoNetData?.bounds) {
+      const b = sumoNetData.bounds;
+      return L.latLngBounds([b.minY, b.minX], [b.maxY, b.maxX]);
+    }
+    const lanes = sumoNetData?.lanes || [];
+    if (!lanes.length) return null;
+    let minLat = Infinity,
+      minLng = Infinity,
+      maxLat = -Infinity,
+      maxLng = -Infinity;
+    for (const lane of lanes) {
+      for (const [lat, lng] of lane.points) {
+        if (lat < minLat) minLat = lat;
+        if (lng < minLng) minLng = lng;
+        if (lat > maxLat) maxLat = lat;
+        if (lng > maxLng) maxLng = lng;
+      }
+    }
+    if (!isFinite(minLat) || !isFinite(minLng) || !isFinite(maxLat) || !isFinite(maxLng)) return null;
+    return L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
+  }, [sumoNetData]);
 
   // Mock data for demonstration (fallback)
   const mockData = {
@@ -424,6 +465,36 @@ const TrafficMap = () => {
     }
   };
 
+  // Load SUMO .net.xml from public folder and render with CRS.Simple (Netedit-like)
+  const loadSumoNetLocal = async (path = "/Sumoconfigs/AddisAbaba.net.xml") => {
+    try {
+      setLoading(true);
+      const data = await parseSumoNetXml(path);
+      setSumoNetData(data);
+      setSumoNetMode(true);
+      window.dispatchEvent(
+        new CustomEvent("notify", {
+          detail: { type: "success", message: "Loaded SUMO network" },
+        })
+      );
+    } catch (e) {
+      console.error("Failed to load SUMO net:", e);
+      window.dispatchEvent(
+        new CustomEvent("notify", {
+          detail: { type: "error", message: e.message || "Failed to load .net.xml" },
+        })
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-load SUMO net on mount so Netedit-style map shows by default if file is present
+  useEffect(() => {
+    loadSumoNetLocal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleIntersectionClick = (intersection) => {
     setSelectedIntersection(intersection);
   };
@@ -592,51 +663,116 @@ const TrafficMap = () => {
           </div>
 
           <div className="control-group">
-            <label>
-              <input
-                type="checkbox"
-                checked={autoRefresh}
-                onChange={(e) => setAutoRefresh(e.target.checked)}
-              />
-              Auto Refresh
-            </label>
+            <label>Network Source:</label>
+            <div className="control-row">
+              <button
+                className={`action-btn ${!sumoNetMode ? "primary" : "secondary"}`}
+                onClick={() => setSumoNetMode(false)}
+                disabled={!sumoNetMode}
+              >
+                Backend Live
+              </button>
+              <button
+                className={`action-btn ${sumoNetMode ? "primary" : "secondary"}`}
+                onClick={() => loadSumoNetLocal()}
+              >
+                Load SUMO Net (local)
+              </button>
+            </div>
           </div>
 
-          <div className="control-group">
-            <label>Refresh Rate:</label>
-            <select
-              value={refreshInterval}
-              onChange={(e) => setRefreshInterval(Number(e.target.value))}
-              className="control-select"
-              disabled={!autoRefresh}
-            >
-              <option value={2000}>2 seconds</option>
-              <option value={5000}>5 seconds</option>
-              <option value={10000}>10 seconds</option>
-              <option value={30000}>30 seconds</option>
-            </select>
-          </div>
+          {sumoNetMode ? (
+            <div className="control-group">
+              <button
+                className="action-btn secondary"
+                onClick={() => {
+                  if (sumoMapRef.current && sumoBounds) {
+                    sumoMapRef.current.fitBounds(sumoBounds, { padding: [20, 20] });
+                  }
+                }}
+              >
+                Fit Whole Network
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="control-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={autoRefresh}
+                    onChange={(e) => setAutoRefresh(e.target.checked)}
+                  />
+                  Auto Refresh
+                </label>
+              </div>
 
-          <button
-            onClick={fetchMapData}
-            className="refresh-btn"
-            disabled={loading}
-          >
-            {loading ? "🔄" : "🔄"} Refresh
-          </button>
+              <div className="control-group">
+                <label>Refresh Rate:</label>
+                <select
+                  value={refreshInterval}
+                  onChange={(e) => setRefreshInterval(Number(e.target.value))}
+                  className="control-select"
+                  disabled={!autoRefresh}
+                >
+                  <option value={2000}>2 seconds</option>
+                  <option value={5000}>5 seconds</option>
+                  <option value={10000}>10 seconds</option>
+                  <option value={30000}>30 seconds</option>
+                </select>
+              </div>
+
+              <button
+                onClick={fetchMapData}
+                className="refresh-btn"
+                disabled={loading}
+              >
+                {loading ? "🔄" : "🔄"} Refresh
+              </button>
+            </>
+          )}
         </div>
 
         {/* Map Container */}
         <div className="map-wrapper">
-          <MapContainer
-            center={addisCenter}
-            zoom={addisZoom}
-            style={{ height: "100%", width: "100%" }}
-          >
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            />
+          {sumoNetMode ? (
+            <MapContainer
+              key="sumo-net"
+              crs={L.CRS.Simple}
+              whenCreated={(m) => (sumoMapRef.current = m)}
+              style={{ height: "100%", width: "100%" }}
+              scrollWheelZoom={true}
+              doubleClickZoom={true}
+              zoomControl={true}
+              zoomSnap={0.25}
+              zoomDelta={0.5}
+              minZoom={-5}
+              maxZoom={24}
+              preferCanvas={true}
+            >
+              {/* Fit to network bounds on mount/update */}
+              {sumoBounds && <FitBoundsController bounds={sumoBounds} />}
+              {/* Render lanes from .net.xml */}
+              {sumoNetData.lanes.map((lane) => (
+                <Polyline
+                  key={lane.id}
+                  positions={lane.points}
+                  color="#1e3a8a"
+                  weight={2}
+                  opacity={0.9}
+                />
+              ))}
+            </MapContainer>
+          ) : (
+            <MapContainer
+              center={addisCenter}
+              zoom={addisZoom}
+              style={{ height: "100%", width: "100%" }}
+            >
+              <TileLayer
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              />
 
             <MapController
               intersections={mapData.intersections}
@@ -792,53 +928,58 @@ const TrafficMap = () => {
                 </Marker>
               ))}
           </MapContainer>
+          )}
           {/* Compact on-map legend */}
-          <div className="map-legend-overlay">
-            <div className="legend-row">
-              <span className="legend-swatch legend-car" /> Sedan/Car
+          {!sumoNetMode && (
+            <div className="map-legend-overlay">
+              <div className="legend-row">
+                <span className="legend-swatch legend-car" /> Sedan/Car
+              </div>
+              <div className="legend-row">
+                <span className="legend-swatch legend-bus" /> Bus
+              </div>
+              <div className="legend-row">
+                <span className="legend-swatch legend-truck" /> Truck
+              </div>
+              <div className="legend-row">
+                <span className="legend-swatch legend-taxi" /> Taxi
+              </div>
+              <div className="legend-row">
+                <span className="legend-signal" /> Traffic Signal
+              </div>
             </div>
-            <div className="legend-row">
-              <span className="legend-swatch legend-bus" /> Bus
-            </div>
-            <div className="legend-row">
-              <span className="legend-swatch legend-truck" /> Truck
-            </div>
-            <div className="legend-row">
-              <span className="legend-swatch legend-taxi" /> Taxi
-            </div>
-            <div className="legend-row">
-              <span className="legend-signal" /> Traffic Signal
-            </div>
-          </div>
+          )}
           {/* On-map KPIs */}
-          <div className="map-kpis-overlay">
-            <div className="kpi">
-              <span className="kpi-label">Vehicles</span>
-              <span className="kpi-value">{totals.vehicles}</span>
+          {!sumoNetMode && (
+            <div className="map-kpis-overlay">
+              <div className="kpi">
+                <span className="kpi-label">Vehicles</span>
+                <span className="kpi-value">{totals.vehicles}</span>
+              </div>
+              <div className="kpi">
+                <span className="kpi-label">TLS</span>
+                <span className="kpi-value">{totals.tls}</span>
+              </div>
+              <div className="kpi">
+                <span className="kpi-dot dot-red" />
+                {tlsCounts.red}
+              </div>
+              <div className="kpi">
+                <span className="kpi-dot dot-yellow" />
+                {tlsCounts.yellow}
+              </div>
+              <div className="kpi">
+                <span className="kpi-dot dot-green" />
+                {tlsCounts.green}
+              </div>
+              <button
+                className="kpi-toggle"
+                onClick={() => setShowDensity(!showDensity)}
+              >
+                {showDensity ? "Hide" : "Show"} Density
+              </button>
             </div>
-            <div className="kpi">
-              <span className="kpi-label">TLS</span>
-              <span className="kpi-value">{totals.tls}</span>
-            </div>
-            <div className="kpi">
-              <span className="kpi-dot dot-red" />
-              {tlsCounts.red}
-            </div>
-            <div className="kpi">
-              <span className="kpi-dot dot-yellow" />
-              {tlsCounts.yellow}
-            </div>
-            <div className="kpi">
-              <span className="kpi-dot dot-green" />
-              {tlsCounts.green}
-            </div>
-            <button
-              className="kpi-toggle"
-              onClick={() => setShowDensity(!showDensity)}
-            >
-              {showDensity ? "Hide" : "Show"} Density
-            </button>
-          </div>
+          )}
         </div>
 
         {/* Side Panel */}
