@@ -1,6 +1,10 @@
 // Lightweight parser for SUMO .net.xml to render like Netedit (lane shapes in net coords)
 // Usage: parseSumoNetXml("/Sumoconfigs/AddisAbaba.net.xml")
-// Returns { lanes: [{ id, points: [[y,x], ...] }], bounds: { minX, minY, maxX, maxY } }
+// Returns {
+//   lanes: [{ id, points: [[y,x], ...] }],
+//   bounds: { minX, minY, maxX, maxY },
+//   tls: [{ id, lat, lng }]
+// }
 
 export async function parseSumoNetXml(url) {
   const res = await fetch(url, { credentials: "same-origin" });
@@ -38,5 +42,18 @@ export async function parseSumoNetXml(url) {
     return { id, points };
   }).filter((l) => l.points.length >= 2);
 
-  return { lanes, bounds };
+  // Traffic light junctions with x,y
+  const jNodes = Array.from(doc.querySelectorAll('junction[type="traffic_light"]'));
+  const tls = jNodes
+    .map((jn) => {
+      const id = jn.getAttribute("id") || "";
+      const x = parseFloat(jn.getAttribute("x"));
+      const y = parseFloat(jn.getAttribute("y"));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      // CRS.Simple expects lat=y, lng=x
+      return { id, lat: y, lng: x };
+    })
+    .filter(Boolean);
+
+  return { lanes, bounds, tls };
 }

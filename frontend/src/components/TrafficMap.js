@@ -225,7 +225,7 @@ const TrafficMap = () => {
 
   // SUMO Net (client-side .net.xml) view state
   const [sumoNetMode, setSumoNetMode] = useState(false);
-  const [sumoNetData, setSumoNetData] = useState({ lanes: [], bounds: null });
+  const [sumoNetData, setSumoNetData] = useState({ lanes: [], bounds: null, tls: [] });
   const sumoMapRef = useRef(null);
 
   // Derive leaflet bounds from file bounds or from lane points if absent
@@ -525,34 +525,14 @@ const TrafficMap = () => {
     }
   };
 
-  const tlsIcon = (state) => {
-    const s = (state || "").toLowerCase();
-    const isRed = s.includes("r");
-    const isYellow = s.includes("y");
-    const isGreen = s.includes("g");
-    const svg = `
-      <svg width="28" height="48" viewBox="0 0 28 48" xmlns="http://www.w3.org/2000/svg" class="traffic-signal">
-        <rect x="4" y="2" width="20" height="44" rx="6" fill="#263238" stroke="#000" stroke-width="1" />
-        <g class="light-group">
-          <circle cx="14" cy="12" r="6" fill="#F44336" opacity="${
-            isRed ? 1 : 0.25
-          }" class="${isRed ? "light-active light-red" : ""}" />
-          <circle cx="14" cy="24" r="6" fill="#FFEB3B" opacity="${
-            isYellow ? 1 : 0.25
-          }" class="${isYellow ? "light-active light-yellow" : ""}" />
-          <circle cx="14" cy="36" r="6" fill="#4CAF50" opacity="${
-            isGreen ? 1 : 0.25
-          }" class="${isGreen ? "light-active light-green" : ""}" />
-        </g>
-      </svg>
-    `;
-    return L.divIcon({
+  // Simple emoji-based traffic light icon
+  const tlsEmojiIcon = () =>
+    L.divIcon({
       className: "custom-traffic-icon",
-      html: svg,
-      iconSize: [28, 48],
-      iconAnchor: [14, 24],
+      html: '<div style="font-size:18px; line-height:18px">🚦</div>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
     });
-  };
 
   // Lightweight clustering by rounding coordinates into grid cells
   const clusterVehicles = (vehicles, gridSizeDeg = 0.0015) => {
@@ -762,6 +742,18 @@ const TrafficMap = () => {
                   opacity={0.9}
                 />
               ))}
+
+              {/* Traffic Lights from .net.xml (junctions) */}
+              {mapView === "traffic" && Array.isArray(sumoNetData.tls) &&
+                sumoNetData.tls.map((t) => (
+                  <Marker key={t.id} position={[t.lat, t.lng]} icon={tlsEmojiIcon()}>
+                    <Popup>
+                      <div>
+                        <strong>TLS {t.id}</strong>
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
             </MapContainer>
           ) : (
             <MapContainer
@@ -791,18 +783,18 @@ const TrafficMap = () => {
               />
             ))}
 
-            {/* Traffic Lights from SUMO */}
-            {Array.isArray(mapData.tls) &&
+            {/* Traffic Lights (backend live) */}
+            {mapView === "traffic" && Array.isArray(mapData.tls) &&
               mapData.tls.map((t) => (
                 <Marker
                   key={t.id}
                   position={[t.lat, t.lng]}
-                  icon={tlsIcon(t.state)}
+                  icon={tlsEmojiIcon()}
                 >
                   <Popup>
                     <div>
                       <strong>TLS {t.id}</strong>
-                      <div>State: {t.state}</div>
+                      {t.state && <div>State: {t.state}</div>}
                     </div>
                   </Popup>
                 </Marker>
