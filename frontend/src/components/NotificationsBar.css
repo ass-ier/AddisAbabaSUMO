@@ -1,0 +1,30 @@
+.notifications-bar {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notification {
+  padding: 10px 14px;
+  border-radius: 8px;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+  font-size: 14px;
+}
+
+.notif-info {
+  background: #2563eb;
+}
+.notif-success {
+  background: #16a34a;
+}
+.notif-warning {
+  background: #d97706;
+}
+.notif-error {
+  background: #dc2626;
+}

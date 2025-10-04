@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global Theme Variables */
+:root {
+  --bg: #f8fafc; /* app background */
+  --card: #ffffff; /* surfaces/cards */
+  --border: #e5e7eb; /* separators */
+  --text: #111827; /* primary text */
+  --muted: #6b7280; /* secondary text */
+  --muted-bg: #f3f4f6; /* subtle bg */
+  --primary: #4a6cf7; /* brand primary */
+  --primary-contrast: #ffffff;
+  --accent: #60a5fa; /* info/accent */
+  --success: #16a34a;
+  --warning: #f59e0b;
+  --error: #dc3545;
+  --table-header: #f8f9fa;
+  --shadow-rgb: 0, 0, 0;
+}
+
+:root[data-theme="dark"],
+.dark {
+  --bg: #0b1220;
+  --card: #111827;
+  --border: #1f2937;
+  --text: #f9fafb;
+  --muted: #d1d5db;
+  --muted-bg: #111827;
+  --primary: #60a5fa;
+  --primary-contrast: #0b1220;
+  --accent: #93c5fd;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #f87171;
+  --table-header: #0f172a;
+  --shadow-rgb: 0, 0, 0;
+}
+
+html,
+body,
+#root {
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Smooth theme transition */
+* {
+  transition: background-color 0.25s ease, color 0.25s ease,
+    border-color 0.25s ease;
+}

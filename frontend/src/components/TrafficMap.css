@@ -1,0 +1,574 @@
+/* TrafficMap.css */
+.traffic-map-container {
+  display: flex;
+  height: calc(100vh - 200px);
+  min-height: 600px;
+  gap: 16px;
+  background: #f8f9fa;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* Map Controls */
+.map-controls {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  z-index: 1000;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  padding: 8px 10px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.control-group label {
+  color: #374151;
+  white-space: nowrap;
+}
+
+.control-select {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+  font-size: 14px;
+  min-width: 120px;
+  transition: border-color 0.2s ease;
+}
+
+.control-select:focus {
+  outline: none;
+  border-color: #4a6cf7;
+  box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.1);
+}
+
+.control-select:disabled {
+  background: #f3f4f6;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.refresh-btn {
+  padding: 8px 12px;
+  background: #1e88e5;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 4px 10px rgba(30, 136, 229, 0.25);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(74, 108, 247, 0.3);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Map Wrapper */
+.map-wrapper {
+  flex: 1;
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* Custom Traffic Icons */
+.custom-traffic-icon {
+  background: transparent !important;
+  border: none !important;
+  transform: translate3d(0, 0, 0);
+}
+
+/* Modern intersection dot */
+.intersection-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+/* Vehicle icon subtle shadow */
+.vehicle-icon {
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.25));
+}
+
+/* Traffic signal animations */
+.traffic-signal .light-active {
+  transition: opacity 250ms ease, filter 250ms ease;
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.6));
+}
+.traffic-signal .light-red.light-active {
+  filter: drop-shadow(0 0 6px rgba(244, 67, 54, 0.9));
+}
+.traffic-signal .light-yellow.light-active {
+  filter: drop-shadow(0 0 6px rgba(255, 235, 59, 0.9));
+}
+.traffic-signal .light-green.light-active {
+  filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.9));
+}
+
+/* On-map compact legend */
+.map-legend-overlay {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 8px 10px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  color: #1f2937;
+}
+
+/* KPIs overlay */
+.map-kpis-overlay {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 6px 8px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+.kpi {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f3f4f6;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #374151;
+}
+.kpi-label {
+  opacity: 0.8;
+}
+.kpi-value {
+  font-weight: 700;
+}
+.kpi-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.dot-red {
+  background: #f44336;
+}
+.dot-yellow {
+  background: #ffeb3b;
+}
+.dot-green {
+  background: #4caf50;
+}
+.kpi-toggle {
+  background: #4a6cf7;
+  color: #fff;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 18px;
+}
+.legend-row + .legend-row {
+  margin-top: 6px;
+}
+.legend-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.legend-car {
+  background: #1976d2;
+}
+.legend-bus {
+  background: #1565c0;
+}
+.legend-truck {
+  background: #546e7a;
+}
+.legend-taxi {
+  background: #fdd835;
+}
+.legend-signal {
+  width: 10px;
+  height: 18px;
+  border-radius: 3px;
+  background: linear-gradient(#f44336 33%, #ffeb3b 33% 66%, #4caf50 66%);
+  box-shadow: inset 0 0 0 2px #263238;
+}
+
+/* Popup Styles */
+.intersection-popup {
+  min-width: 200px;
+  padding: 8px;
+}
+
+.intersection-popup h3 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  color: #1f2937;
+}
+
+.intersection-popup p {
+  margin: 4px 0;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.intersection-popup strong {
+  color: #374151;
+}
+
+.popup-btn {
+  margin-top: 8px;
+  padding: 6px 12px;
+  background: #4a6cf7;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.popup-btn:hover {
+  background: #3b82f6;
+}
+
+.emergency-popup {
+  min-width: 180px;
+  padding: 8px;
+}
+
+.emergency-popup h3 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  color: #dc2626;
+}
+
+.emergency-popup p {
+  margin: 4px 0;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+/* Sidebar */
+.map-sidebar {
+  width: 320px;
+  background: white;
+  padding: 20px;
+  overflow-y: auto;
+  border-left: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sidebar-section {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.sidebar-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.sidebar-section h3 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+/* Summary Stats */
+.summary-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+}
+
+.stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.stat-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+/* Intersection Details */
+.intersection-details h4 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  color: #1f2937;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.detail-item span:first-child {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.detail-item span:last-child {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.status-normal {
+  color: #4caf50;
+}
+.status-congested {
+  color: #ff9800;
+}
+.status-critical {
+  color: #f44336;
+}
+.status-emergency {
+  color: #9c27b0;
+}
+
+.signal-green {
+  color: #4caf50;
+}
+.signal-yellow {
+  color: #ff9800;
+}
+.signal-red {
+  color: #f44336;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.action-btn.primary {
+  background: #4a6cf7;
+  color: white;
+}
+
+.action-btn.primary:hover {
+  background: #3b82f6;
+}
+
+.action-btn.secondary {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.action-btn.secondary:hover {
+  background: #e5e7eb;
+}
+
+/* Legend */
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #374151;
+}
+
+.legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .traffic-map-container {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .map-sidebar {
+    width: 100%;
+    max-height: 300px;
+  }
+
+  .map-wrapper {
+    height: 500px;
+  }
+}
+
+@media (max-width: 768px) {
+  .map-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .control-group {
+    justify-content: space-between;
+  }
+
+  .control-select {
+    min-width: auto;
+    flex: 1;
+  }
+}
+
+/* Loading States */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  border-radius: 8px;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f4f6;
+  border-top: 4px solid #4a6cf7;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Leaflet Overrides */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.leaflet-popup-tip {
+  background: white;
+}
+
+.leaflet-control-zoom {
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.leaflet-control-zoom a {
+  background: white;
+  color: #374151;
+  border: none;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.leaflet-control-zoom a:hover {
+  background: #f8f9fa;
+  color: #1f2937;
+}
+
+/* Leaflet lane polylines hover effect */
+.leaflet-interactive:hover {
+  filter: drop-shadow(0 0 4px rgba(33, 150, 243, 0.6));
+}
