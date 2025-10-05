@@ -14,16 +14,11 @@ const SuperAdminDashboard = () => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/stats/overview", {
-          credentials: "include",
-        });
-        const data = await res.json();
+        const data = await (await import("../utils/api")).api.getStatsOverview();
         let userCount = data.userCount || 0;
         try {
-          const uc = await fetch("/api/users/count", {
-            credentials: "include",
-          });
-          const u = await uc.json();
+          // super_admin-only endpoint provides authoritative count
+          const u = await (await import("../utils/api")).api.getUserCount();
           if (typeof u.count === "number") userCount = u.count;
         } catch {}
         setStats({ ...data, userCount });

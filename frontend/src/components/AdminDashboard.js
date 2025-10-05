@@ -14,6 +14,12 @@ const AdminDashboard = () => {
     queueLength: 0,
     emergencyOverrides: 0,
   });
+  const [overview, setOverview] = useState({
+    userCount: 0,
+    activeSimulations: 0,
+    systemHealth: 0,
+    emergencyCount: 0,
+  });
 
   useEffect(() => {
     (async () => {
@@ -22,9 +28,12 @@ const AdminDashboard = () => {
         setSimulationStatus(status?.isRunning ? "running" : "stopped");
       } catch (_) {}
       try {
-        const res = await fetch("/api/stats/admin", { credentials: "include" });
-        const data = await res.json();
+        const data = await api.getAdminStats();
         setLiveStats(data);
+      } catch (_) {}
+      try {
+        const ov = await api.getStatsOverview();
+        setOverview(ov);
       } catch (_) {}
     })();
   }, []);
@@ -260,6 +269,46 @@ const AdminDashboard = () => {
                 ? "Paused"
                 : "Stopped"}
             </span>
+          </div>
+        </div>
+
+        {/* System Statistics (dynamic) */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="card shadow-card">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Total Users</p>
+                <p className="text-2xl font-bold">{overview.userCount || 0}</p>
+              </div>
+              <div className="text-3xl">👥</div>
+            </div>
+          </div>
+          <div className="card shadow-card">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Active Simulations</p>
+                <p className="text-2xl font-bold">{overview.activeSimulations || 0}</p>
+              </div>
+              <div className="text-3xl">🚦</div>
+            </div>
+          </div>
+          <div className="card shadow-card">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">System Health</p>
+                <p className="text-2xl font-bold">{(overview.systemHealth || 0)}%</p>
+              </div>
+              <div className="text-3xl">💚</div>
+            </div>
+          </div>
+          <div className="card shadow-card">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Active Emergencies</p>
+                <p className="text-2xl font-bold">{overview.emergencyCount || 0}</p>
+              </div>
+              <div className="text-3xl">🚨</div>
+            </div>
           </div>
         </div>
 

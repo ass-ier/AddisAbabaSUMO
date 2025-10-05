@@ -91,6 +91,14 @@ export const api = {
       body: JSON.stringify({ withConfig }),
     }),
 
+  // Stats
+  getStatsOverview: async () =>
+    fetchJson(`${BASE_API}/api/stats/overview`, { headers: authHeaders() }),
+  getAdminStats: async () =>
+    fetchJson(`${BASE_API}/api/stats/admin`, { headers: authHeaders() }),
+  getUserCount: async () =>
+    fetchJson(`${BASE_API}/api/users/count`, { headers: authHeaders() }),
+
   // SUMO config selection
   listSumoConfigs: async () =>
     fetchJson(`${BASE_API}/api/sumo/configs`, { headers: authHeaders() }),
