@@ -1205,26 +1205,65 @@ app.get(
   requireAnyRole(["super_admin", "admin"]),
   async (req, res) => {
     try {
-      const [userCount, activeEmergencies, latestStatus] = await Promise.all([
+      const results = await Promise.allSettled([
         User.countDocuments({}),
         Emergency.countDocuments({ active: true }),
         SimulationStatus.findOne().sort({ lastUpdated: -1 }),
+        Promise.resolve(mongoose.connection.readyState),
+        TrafficData.countDocuments({ timestamp: { $gte: new Date(Date.now() - 15 * 60 * 1000) } }),
       ]);
+
+      const [uRes, eRes, sRes, mRes, tRes] = results;
+      const userCount = uRes.status === 'fulfilled' ? Number(uRes.value || 0) : 0;
+      const activeEmergencies = eRes.status === 'fulfilled' ? Number(eRes.value || 0) : 0;
+      const latestStatus = sRes.status === 'fulfilled' ? sRes.value : null;
+      const mongoState = mRes.status === 'fulfilled' ? mRes.value : mongoose.connection.readyState;
+      const recentTrafficDocs = tRes.status === 'fulfilled' ? Number(tRes.value || 0) : 0;
+
+      // Log any failures for debugging without failing the endpoint
+      if (uRes.status === 'rejected') console.warn('[overview] userCount failed:', uRes.reason?.message || uRes.reason);
+      if (eRes.status === 'rejected') console.warn('[overview] emergencies failed:', eRes.reason?.message || eRes.reason);
+      if (sRes.status === 'rejected') console.warn('[overview] sim status failed:', sRes.reason?.message || sRes.reason);
+      if (tRes.status === 'rejected') console.warn('[overview] telemetry count failed:', tRes.reason?.message || tRes.reason);
+
       const activeSimulations = latestStatus?.isRunning ? 1 : 0;
 
-      // Simple health: Mongo connected and bridge not errored
-      const systemHealth = 98.5;
+      // Dynamic health score [0..100]
+      const mongoHealthy = mongoState === 1; // 1 = connected
+      const simHealthy = !!activeSimulations; // running = healthy
+      const telemetryHealthy = recentTrafficDocs > 0; // we have fresh data
+
+      let score = 0;
+      score += mongoHealthy ? 40 : 0;
+      score += simHealthy ? 40 : 20; // if not running, still partially OK
+      score += telemetryHealthy ? 20 : 0;
+      const systemHealth = Math.min(100, Math.max(0, score));
 
       res.json({
         userCount,
         activeSimulations,
         systemHealth,
         emergencyCount: activeEmergencies,
+        health: {
+          mongoHealthy,
+          simHealthy,
+          telemetryHealthy,
+          mongoState,
+          recentTrafficDocs,
+        },
       });
     } catch (e) {
-      res
-        .status(500)
-        .json({ message: "Failed to load overview stats", error: e.message });
+      // Absolute fallback: best-effort values with minimal info, never 500
+      const mongoState = mongoose.connection.readyState;
+      const mongoHealthy = mongoState === 1;
+      const systemHealth = mongoHealthy ? 40 : 0;
+      return res.status(200).json({
+        userCount: 0,
+        activeSimulations: 0,
+        systemHealth,
+        emergencyCount: 0,
+        health: { mongoHealthy, simHealthy: false, telemetryHealthy: false, mongoState, recentTrafficDocs: 0 },
+      });
     }
   }
 );

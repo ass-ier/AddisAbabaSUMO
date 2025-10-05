@@ -14,15 +14,17 @@ const SuperAdminDashboard = () => {
   useEffect(() => {
     (async () => {
       try {
-        const data = await (await import("../utils/api")).api.getStatsOverview();
+        const { api } = await import("../utils/api");
+        const data = await api.getStatsOverview();
         let userCount = data.userCount || 0;
         try {
-          // super_admin-only endpoint provides authoritative count
-          const u = await (await import("../utils/api")).api.getUserCount();
+          const u = await api.getUserCount();
           if (typeof u.count === "number") userCount = u.count;
         } catch {}
         setStats({ ...data, userCount });
-      } catch (_) {}
+      } catch (err) {
+        console.warn('Failed to load overview stats:', err?.message || err);
+      }
     })();
   }, []);
 
@@ -46,7 +48,7 @@ const SuperAdminDashboard = () => {
       value: `${stats.systemHealth || 0}%`,
       change: "",
       icon: "💚",
-      status: "success",
+      status: stats.systemHealth >= 80 ? "success" : stats.systemHealth >= 60 ? "warning" : "error",
     },
     {
       title: "Emergency Overrides",
@@ -127,7 +129,7 @@ const SuperAdminDashboard = () => {
                   <p className="text-sm font-medium text-muted-foreground">
                     {stat.title}
                   </p>
-                  <p className="text-2xl font-bold">{stat.value}</p>
+                  <p className={`text-2xl font-bold ${stat.title === 'System Health' ? (stats.systemHealth >= 80 ? 'text-green-700' : stats.systemHealth >= 60 ? 'text-yellow-700' : 'text-red-700') : ''}`}>{stat.value}</p>
                   <p className="text-xs text-muted-foreground">{stat.change}</p>
                 </div>
                 <div className="text-3xl">{stat.icon}</div>

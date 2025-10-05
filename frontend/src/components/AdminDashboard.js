@@ -34,7 +34,9 @@ const AdminDashboard = () => {
       try {
         const ov = await api.getStatsOverview();
         setOverview(ov);
-      } catch (_) {}
+      } catch (err) {
+        console.warn('Failed to load system overview:', err?.message || err);
+      }
     })();
   }, []);
 
@@ -296,7 +298,12 @@ const AdminDashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">System Health</p>
-                <p className="text-2xl font-bold">{(overview.systemHealth || 0)}%</p>
+                <p className={`text-2xl font-bold ${(() => {
+                  const h = Number(overview.systemHealth || 0);
+                  if (h >= 80) return 'text-green-700';
+                  if (h >= 60) return 'text-yellow-700';
+                  return 'text-red-700';
+                })()}`}>{(overview.systemHealth || 0)}%</p>
               </div>
               <div className="text-3xl">💚</div>
             </div>
