@@ -233,7 +233,7 @@ const TrafficMap = () => {
   const [showDensity, setShowDensity] = useState(true);
 
   // SUMO Net (client-side .net.xml) view state
-  const [sumoNetMode, setSumoNetMode] = useState(false);
+  const [sumoNetMode, setSumoNetMode] = useState(true);
   const [sumoNetData, setSumoNetData] = useState({ lanes: [], bounds: null, tls: [] });
   const sumoMapRef = useRef(null);
 
@@ -260,6 +260,19 @@ const TrafficMap = () => {
     if (!isFinite(minLat) || !isFinite(minLng) || !isFinite(maxLat) || !isFinite(maxLng)) return null;
     return L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
   }, [sumoNetData]);
+
+  // Batch lanes into MultiPolyline chunks to reduce React node count
+  const laneBatches = useMemo(() => {
+    const all = Array.isArray(sumoNetData.lanes)
+      ? sumoNetData.lanes.map((l) => l.points)
+      : [];
+    const batchSize = 2000; // larger batches to reduce React nodes
+    const batches = [];
+    for (let i = 0; i < all.length; i += batchSize) {
+      batches.push(all.slice(i, i + batchSize));
+    }
+    return batches;
+  }, [sumoNetData.lanes]);
 
   // Mock data for demonstration (fallback)
   const mockData = {
@@ -650,24 +663,7 @@ const TrafficMap = () => {
             </select>
           </div>
 
-          <div className="control-group">
-            <label>Network Source:</label>
-            <div className="control-row">
-              <button
-                className={`action-btn ${!sumoNetMode ? "primary" : "secondary"}`}
-                onClick={() => setSumoNetMode(false)}
-                disabled={!sumoNetMode}
-              >
-                Backend Live
-              </button>
-              <button
-                className={`action-btn ${sumoNetMode ? "primary" : "secondary"}`}
-                onClick={() => loadSumoNetLocal()}
-              >
-                Load SUMO Net (local)
-              </button>
-            </div>
-          </div>
+          {/* Network Source removed: default to SUMO Net view */}
 
           {/* Simulation Controls moved from sidebar */}
           <div className="control-group">
@@ -770,263 +766,45 @@ const TrafficMap = () => {
 
         {/* Map Container */}
         <div className="map-wrapper" style={{ width: "100%" }}>
-          {sumoNetMode ? (
-            <MapContainer
-              key="sumo-net"
-              crs={L.CRS.Simple}
-              whenCreated={(m) => (sumoMapRef.current = m)}
-              style={{ height: "100%", width: "100%" }}
-              scrollWheelZoom={true}
-              doubleClickZoom={true}
-              zoomControl={true}
-              zoomSnap={0.25}
-              zoomDelta={0.5}
-              minZoom={-5}
-              maxZoom={24}
-              preferCanvas={true}
-            >
-              {/* Fit to network bounds on mount/update */}
-              {sumoBounds && <FitBoundsController bounds={sumoBounds} />}
-              {/* Render lanes from .net.xml */}
-              {sumoNetData.lanes.map((lane) => (
-                <Polyline
-                  key={lane.id}
-                  positions={lane.points}
-                  color="#1e3a8a"
-                  weight={2}
-                  opacity={0.9}
-                />
-              ))}
-
-              {/* Traffic Lights from .net.xml (junctions) */}
-              {mapView === "traffic" && Array.isArray(sumoNetData.tls) &&
-                sumoNetData.tls.map((t) => (
-                  <Marker key={t.id} position={[t.lat, t.lng]} icon={tlsEmojiIcon()}>
-                    <Popup>
-                      <div>
-                        <strong>TLS {t.id}</strong>
-                      </div>
-                    </Popup>
-                  </Marker>
-                ))}
-            </MapContainer>
-          ) : (
-            <MapContainer
-              center={addisCenter}
-              zoom={addisZoom}
-              style={{ height: "100%", width: "100%" }}
-            >
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              />
-
-            <MapController
-              intersections={mapData.intersections}
-              lanes={mapData.lanes}
-              geoBounds={mapData.geoBounds}
-            />
-
-            {/* SUMO Lanes */}
-            {mapData.lanes.map((lane) => (
+          <MapContainer
+            key="sumo-net"
+            crs={L.CRS.Simple}
+            whenCreated={(m) => (sumoMapRef.current = m)}
+            style={{ height: "100%", width: "100%" }}
+            scrollWheelZoom={true}
+            doubleClickZoom={true}
+            zoomControl={true}
+            zoomSnap={0.25}
+            zoomDelta={0.5}
+            minZoom={-5}
+            maxZoom={24}
+            preferCanvas={true}
+          >
+            {/* Fit to network bounds on mount/update */}
+            {sumoBounds && <FitBoundsController bounds={sumoBounds} />}
+            {/* Render lanes from .net.xml - batch into MultiPolylines to reduce React nodes */}
+            {laneBatches.map((batch, idx) => (
               <Polyline
-                key={lane.id}
-                positions={lane.points}
-                color="#2196F3"
+                key={`batch_${idx}`}
+                positions={batch}
+                color="#1e3a8a"
                 weight={2}
-                opacity={0.6}
+                opacity={0.9}
               />
             ))}
 
-            {/* Traffic Lights (backend live) */}
-            {mapView === "traffic" && Array.isArray(mapData.tls) &&
-              mapData.tls.map((t) => (
-                <Marker
-                  key={t.id}
-                  position={[t.lat, t.lng]}
-                  icon={tlsEmojiIcon()}
-                >
+            {/* Traffic Lights from .net.xml (junctions) */}
+            {mapView === "traffic" && Array.isArray(sumoNetData.tls) &&
+              sumoNetData.tls.map((t) => (
+                <Marker key={t.id} position={[t.lat, t.lng]} icon={tlsEmojiIcon()}>
                   <Popup>
                     <div>
                       <strong>TLS {t.id}</strong>
-                      {t.state && <div>State: {t.state}</div>}
                     </div>
                   </Popup>
                 </Marker>
               ))}
-
-            {/* Traffic Flow Lines (demo overlay) */}
-            {mapData.trafficFlow.map((flow) => (
-              <Polyline
-                key={flow.id}
-                positions={flow.path}
-                color={getTrafficFlowColor(flow.intensity)}
-                weight={4}
-                opacity={0.7}
-              />
-            ))}
-
-            {/* Intersections */}
-            {filteredIntersections.map((intersection) => (
-              <Marker
-                key={intersection.id}
-                position={[intersection.lat, intersection.lng]}
-                icon={createIntersectionIcon(intersection.status)}
-                eventHandlers={{
-                  click: () => handleIntersectionClick(intersection),
-                }}
-              >
-                <Popup>
-                  <div className="intersection-popup">
-                    <h3>{intersection.name}</h3>
-                    <p>
-                      <strong>Status:</strong> {intersection.status}
-                    </p>
-                    <p>
-                      <strong>Queue Length:</strong> {intersection.queueLength}{" "}
-                      vehicles
-                    </p>
-                    <p>
-                      <strong>Signal:</strong> {intersection.signalState}
-                    </p>
-                    <p>
-                      <strong>Congestion:</strong>
-                      <span
-                        style={{
-                          color: getCongestionColor(intersection.congestion),
-                        }}
-                      >
-                        {intersection.congestion}
-                      </span>
-                    </p>
-                    {canManualOverride && (
-                      <button
-                        className="popup-btn"
-                        onClick={() => manualOverride(intersection)}
-                      >
-                        Manual Override
-                      </button>
-                    )}
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
-
-            {/* Emergency Vehicles */}
-            {mapData.emergencyVehicles.map((vehicle) => (
-              <Marker
-                key={vehicle.id}
-                position={[vehicle.lat, vehicle.lng]}
-                icon={createVehicleIcon({
-                  ...vehicle,
-                  angle: vehicle.angle || 0,
-                })}
-              >
-                <Popup>
-                  <div className="emergency-popup">
-                    <h3>🚨 {vehicle.type.replace("_", " ").toUpperCase()}</h3>
-                    <p>
-                      <strong>Priority:</strong> {vehicle.priority}
-                    </p>
-                    <p>
-                      <strong>Destination:</strong> {vehicle.destination}
-                    </p>
-                    <p>
-                      <strong>ETA:</strong> {vehicle.eta}
-                    </p>
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
-
-            {/* Vehicles from SUMO */}
-            {mapView === "traffic" &&
-              clusterVehicles(mapData.vehicles).map((vehicle) => (
-                <Marker
-                  key={vehicle.id}
-                  position={[vehicle.lat, vehicle.lng]}
-                  icon={
-                    vehicle.type === "cluster"
-                      ? L.divIcon({
-                          className: "custom-traffic-icon",
-                          html: `<div style="background:${clusterColor(
-                            vehicle.count
-                          )};color:#fff;border-radius:14px;padding:4px 6px;font-size:12px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3)">${
-                            vehicle.count
-                          }</div>`,
-                          iconSize: [28, 28],
-                          iconAnchor: [14, 14],
-                        })
-                      : createVehicleIcon(vehicle)
-                  }
-                >
-                  {vehicle.type !== "cluster" && (
-                    <Popup>
-                      <div>
-                        <strong>{vehicle.id}</strong>
-                        <div>
-                          Speed: {vehicle.speed?.toFixed?.(1) ?? vehicle.speed}{" "}
-                          m/s
-                        </div>
-                        <div>Type: {vehicle.type}</div>
-                      </div>
-                    </Popup>
-                  )}
-                </Marker>
-              ))}
           </MapContainer>
-          )}
-          {/* Compact on-map legend */}
-          {!sumoNetMode && (
-            <div className="map-legend-overlay">
-              <div className="legend-row">
-                <span className="legend-swatch legend-car" /> Sedan/Car
-              </div>
-              <div className="legend-row">
-                <span className="legend-swatch legend-bus" /> Bus
-              </div>
-              <div className="legend-row">
-                <span className="legend-swatch legend-truck" /> Truck
-              </div>
-              <div className="legend-row">
-                <span className="legend-swatch legend-taxi" /> Taxi
-              </div>
-              <div className="legend-row">
-                <span className="legend-signal" /> Traffic Signal
-              </div>
-            </div>
-          )}
-          {/* On-map KPIs */}
-          {!sumoNetMode && (
-            <div className="map-kpis-overlay">
-              <div className="kpi">
-                <span className="kpi-label">Vehicles</span>
-                <span className="kpi-value">{totals.vehicles}</span>
-              </div>
-              <div className="kpi">
-                <span className="kpi-label">TLS</span>
-                <span className="kpi-value">{totals.tls}</span>
-              </div>
-              <div className="kpi">
-                <span className="kpi-dot dot-red" />
-                {tlsCounts.red}
-              </div>
-              <div className="kpi">
-                <span className="kpi-dot dot-yellow" />
-                {tlsCounts.yellow}
-              </div>
-              <div className="kpi">
-                <span className="kpi-dot dot-green" />
-                {tlsCounts.green}
-              </div>
-              <button
-                className="kpi-toggle"
-                onClick={() => setShowDensity(!showDensity)}
-              >
-                {showDensity ? "Hide" : "Show"} Density
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
