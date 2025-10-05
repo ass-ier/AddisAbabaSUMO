@@ -79,11 +79,12 @@ async function parseXmlInWorker(url) {
     }
   }
 
-  // Exclude internal edges and simplify polylines aggressively
-  // Only include major road families for fast initial render
-  const edgeNodes = Array.from(doc.querySelectorAll("edge:not([function='internal'])"));
+  // Include internal edges (they connect junctions); for non-internal, keep only major road families
+  const allEdges = Array.from(doc.querySelectorAll("edge"));
   const MAJOR_TYPES_RE = /(trunk|primary|secondary)/i;
-  const filteredEdges = edgeNodes.filter((e) => {
+  const filteredEdges = allEdges.filter((e) => {
+    const fn = e.getAttribute('function') || '';
+    if (fn === 'internal') return true;
     const t = e.getAttribute('type') || '';
     // If type missing, include; otherwise allow only major families
     return !t || MAJOR_TYPES_RE.test(t);
@@ -99,7 +100,13 @@ async function parseXmlInWorker(url) {
   for (let idx = 0; idx < laneNodes.length; idx++) {
     const lane = laneNodes[idx];
     const id = lane.getAttribute("id") || `lane_${idx}`;
+    const edgeEl = lane.parentElement;
+    const edgeId = edgeEl ? edgeEl.getAttribute("id") || null : null;
+    const fnAttr = edgeEl ? (edgeEl.getAttribute("function") || "") : "";
+    const isInternal = fnAttr === "internal";
     const shape = lane.getAttribute("shape") || "";
+    const speedAttr = lane.getAttribute("speed");
+    const speed = speedAttr ? parseFloat(speedAttr) : undefined;
     if (!shape) continue;
     // Prepare points in net coords [x,y]
     let pts = shape
@@ -113,7 +120,7 @@ async function parseXmlInWorker(url) {
     if (pts.length > MAX_POINTS_PER_LANE) pts = sampleEveryN(pts, MAX_POINTS_PER_LANE);
     // Convert to Leaflet [lat, lng] as [y, x]
     const latlngs = pts.map(([x, y]) => [y, x]);
-    if (latlngs.length >= 2) lanes.push({ id, points: latlngs });
+    if (latlngs.length >= 2) lanes.push({ id, edgeId, points: latlngs, speed, isInternal });
   }
 
   // Global thinning: hard cap of total lanes
@@ -124,9 +131,9 @@ async function parseXmlInWorker(url) {
     finalLanes = lanes.filter((_, i) => i % step === 0);
   }
 
-  // Traffic light junctions with x,y
-  const jNodes = Array.from(doc.querySelectorAll('junction[type="traffic_light"]'));
-  const tls = jNodes
+  // Traffic lights with x,y (subset of junctions)
+  const jTls = Array.from(doc.querySelectorAll('junction[type="traffic_light"]'));
+  const tls = jTls
     .map((jn) => {
       const id = jn.getAttribute("id") || "";
       const x = parseFloat(jn.getAttribute("x"));
@@ -136,7 +143,38 @@ async function parseXmlInWorker(url) {
     })
     .filter(Boolean);
 
-  return { lanes: finalLanes, bounds, tls };
+  // Junction polygons (fill intersection centers)
+  const jAll = Array.from(doc.querySelectorAll('junction[shape]'));
+  const junctions = jAll
+    .map((jn, idx) => {
+      const id = jn.getAttribute("id") || `j_${idx}`;
+      const type = jn.getAttribute("type") || "";
+      const shape = jn.getAttribute("shape") || "";
+      const pts = shape
+        .trim()
+        .split(/\s+/)
+        .map((pair) => pair.split(",").map((n) => parseFloat(n)))
+        .filter((xy) => xy.length === 2 && xy.every((n) => Number.isFinite(n)))
+        .map(([x, y]) => [y, x]);
+      if (pts.length >= 3) {
+        return { id, type, polygon: pts };
+      }
+      return null;
+    })
+    .filter(Boolean);
+
+  // Junction centers (points) for fallback fill
+  const junctionPoints = Array.from(doc.querySelectorAll('junction[x][y]'))
+    .map((jn) => {
+      const id = jn.getAttribute('id') || '';
+      const x = parseFloat(jn.getAttribute('x'));
+      const y = parseFloat(jn.getAttribute('y'));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return { id, lat: y, lng: x };
+    })
+    .filter(Boolean);
+
+  return { lanes: finalLanes, bounds, tls, junctions, junctionPoints };
 }
 
 self.onmessage = async (e) => {

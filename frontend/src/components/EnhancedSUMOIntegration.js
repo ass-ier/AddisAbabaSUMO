@@ -578,22 +578,6 @@ const EnhancedSUMOIntegration = () => {
                 </div>
               </div>
 
-              {/* SUMO Config Selection */}
-              <div className="config-select" style={{ marginBottom: 12 }}>
-                <label style={{ marginRight: 8 }}>SUMO Config:</label>
-                <select
-                  value={sumoConfigs.selected || ""}
-                  onChange={(e) => setSumoConfig(e.target.value)}
-                  style={{ padding: 6, minWidth: 260 }}
-                >
-                  {(sumoConfigs.files || []).map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               {/* Control Buttons */}
               <div className="control-buttons">
                 <button

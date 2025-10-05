@@ -148,6 +148,8 @@ def main():
                 length = traci.vehicle.getLength(vid)
                 width = traci.vehicle.getWidth(vid)
                 vtype = traci.vehicle.getTypeID(vid)
+                edge_id = traci.vehicle.getRoadID(vid)
+                lane_id = traci.vehicle.getLaneID(vid)
                 item = {
                     'id': vid,
                     'x': x,
@@ -156,7 +158,9 @@ def main():
                     'angle': ang,
                     'length': length,
                     'width': width,
-                    'type': vtype
+                    'type': vtype,
+                    'edgeId': edge_id,
+                    'laneId': lane_id
                 }
                 if geo_ref is not None:
                     try:

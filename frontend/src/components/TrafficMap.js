@@ -5,6 +5,8 @@ import {
   Marker,
   Popup,
   Polyline,
+  Polygon,
+  CircleMarker,
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
@@ -234,7 +236,7 @@ const TrafficMap = () => {
 
   // SUMO Net (client-side .net.xml) view state
   const [sumoNetMode, setSumoNetMode] = useState(true);
-  const [sumoNetData, setSumoNetData] = useState({ lanes: [], bounds: null, tls: [] });
+  const [sumoNetData, setSumoNetData] = useState({ lanes: [], bounds: null, tls: [], junctions: [], junctionPoints: [] });
   const sumoMapRef = useRef(null);
 
   // Derive leaflet bounds from file bounds or from lane points if absent
@@ -261,18 +263,46 @@ const TrafficMap = () => {
     return L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
   }, [sumoNetData]);
 
-  // Batch lanes into MultiPolyline chunks to reduce React node count
-  const laneBatches = useMemo(() => {
-    const all = Array.isArray(sumoNetData.lanes)
-      ? sumoNetData.lanes.map((l) => l.points)
-      : [];
-    const batchSize = 2000; // larger batches to reduce React nodes
-    const batches = [];
-    for (let i = 0; i < all.length; i += batchSize) {
-      batches.push(all.slice(i, i + batchSize));
+  // Build merged "edge" geometries from lanes to emulate thicker Google-like roads
+  const edgeGeoms = useMemo(() => {
+    const lanes = Array.isArray(sumoNetData.lanes) ? sumoNetData.lanes : [];
+    const byEdge = new Map();
+    for (const l of lanes) {
+      const key = l.edgeId || (typeof l.id === 'string' ? String(l.id).split('_')[0] : l.id);
+      if (!key) continue;
+      const rec = byEdge.get(key) || { id: key, rep: null, speed: 0 };
+      // choose representative with most points
+      if (!rec.rep || (l.points?.length || 0) > (rec.rep.points?.length || 0)) rec.rep = l;
+      if (typeof l.speed === 'number' && l.speed > rec.speed) rec.speed = l.speed; // speed limit approx
+      byEdge.set(key, rec);
     }
+    const edges = Array.from(byEdge.values())
+      .filter((e) => e.rep && Array.isArray(e.rep.points) && e.rep.points.length >= 2)
+      .map((e) => ({ id: e.id, points: e.rep.points, speedLimit: e.speed || 13.89 }));
+    return edges;
+  }, [sumoNetData.lanes]);
+
+  // Compute batches for rendering performance
+  const edgeBatches = useMemo(() => {
+    const all = edgeGeoms.map((e) => e.points);
+    const batchSize = 2000; // number of edges per Polyline
+    const batches = [];
+    for (let i = 0; i < all.length; i += batchSize) batches.push(all.slice(i, i + batchSize));
+    return batches;
+  }, [edgeGeoms]);
+
+  // Internal connector lanes to fill junctions
+  const internalBatches = useMemo(() => {
+    const lanes = Array.isArray(sumoNetData.lanes) ? sumoNetData.lanes : [];
+    const internals = lanes.filter((l) => l.isInternal).map((l) => l.points);
+    const batchSize = 2000;
+    const batches = [];
+    for (let i = 0; i < internals.length; i += batchSize) batches.push(internals.slice(i, i + batchSize));
     return batches;
   }, [sumoNetData.lanes]);
+
+  // Live congestion map per edge from vehicles (avg speed vs limit)
+  const [edgeCongestion, setEdgeCongestion] = useState({});
 
   // Mock data for demonstration (fallback)
   const mockData = {
@@ -421,18 +451,42 @@ const TrafficMap = () => {
         } else if (payload.type === "viz") {
           if (payload.vehicles) {
             // Vehicles include lat/lon when available; convert to Leaflet lat,lng
-            next.vehicles = payload.vehicles
-              .filter(
-                (v) => typeof v.lat === "number" && typeof v.lon === "number"
+            const vehicles = payload.vehicles
+              .filter((v) =>
+                (typeof v.lat === "number" && typeof v.lon === "number") ||
+                (typeof v.x === "number" && typeof v.y === "number")
               )
               .map((v) => ({
                 id: v.id,
-                lat: v.lat,
-                lng: v.lon,
+                // WGS84 for tile-based maps (not used in CRS.Simple)
+                lat: typeof v.lat === "number" ? v.lat : undefined,
+                lng: typeof v.lon === "number" ? v.lon : undefined,
+                // Net coordinates for CRS.Simple (lat=y, lng=x)
+                netLat: typeof v.y === "number" ? v.y : undefined,
+                netLng: typeof v.x === "number" ? v.x : undefined,
                 speed: v.speed,
                 angle: v.angle,
                 type: v.type,
+                edgeId: v.edgeId,
+                laneId: v.laneId,
               }));
+            next.vehicles = vehicles;
+
+            // Update congestion map by averaging speeds per edgeId
+            const byEdge = new Map();
+            for (const v of vehicles) {
+              const eid = v.edgeId;
+              if (!eid || typeof v.speed !== "number") continue;
+              const rec = byEdge.get(eid) || { sum: 0, count: 0 };
+              rec.sum += Math.max(v.speed, 0);
+              rec.count += 1;
+              byEdge.set(eid, rec);
+            }
+            const agg = {};
+            for (const [eid, { sum, count }] of byEdge.entries()) {
+              agg[eid] = sum / Math.max(count, 1);
+            }
+            setEdgeCongestion(agg);
           }
           if (payload.tls) {
             next.tls = payload.tls
@@ -782,16 +836,76 @@ const TrafficMap = () => {
           >
             {/* Fit to network bounds on mount/update */}
             {sumoBounds && <FitBoundsController bounds={sumoBounds} />}
-            {/* Render lanes from .net.xml - batch into MultiPolylines to reduce React nodes */}
-            {laneBatches.map((batch, idx) => (
+
+            {/* Junction fill polygons (to cover intersection centers) */}
+            {Array.isArray(sumoNetData.junctions) &&
+              sumoNetData.junctions.map((j) => (
+                <Polygon
+                  key={`jpoly_${j.id}`}
+                  positions={j.polygon}
+                  pathOptions={{ color: "#9ea3a8", weight: 0, fillColor: "#9ea3a8", fillOpacity: 0.95 }}
+                />
+              ))}
+            {/* Fallback: junction center disks to fill any remaining holes */}
+            {Array.isArray(sumoNetData.junctionPoints) &&
+              sumoNetData.junctionPoints.map((p) => (
+                <CircleMarker
+                  key={`jpt_${p.id}`}
+                  center={[p.lat, p.lng]}
+                  radius={6}
+                  pathOptions={{ color: "#9ea3a8", weight: 0, fillColor: "#9ea3a8", fillOpacity: 0.95 }}
+                />
+              ))}
+
+            {/* Internal connectors first to close junction gaps */}
+            {internalBatches.map((batch, idx) => (
               <Polyline
-                key={`batch_${idx}`}
+                key={`internal_batch_${idx}`}
                 positions={batch}
-                color="#1e3a8a"
-                weight={2}
+                color="#9ea3a8"
+                weight={6}
                 opacity={0.9}
+                lineCap="round"
+                lineJoin="round"
               />
             ))}
+
+            {/* Base merged edges as thicker lines */}
+            {edgeBatches.map((batch, idx) => (
+              <Polyline
+                key={`edge_batch_${idx}`}
+                positions={batch}
+                color="#9ea3a8"
+                weight={6}
+                opacity={0.85}
+                lineCap="round"
+                lineJoin="round"
+              />
+            ))}
+
+            {/* Optional: overlay dynamic congestion color atop base edges */}
+            {edgeGeoms.map((e) => {
+              const avgSpeed = edgeCongestion[e.id];
+              let color = "#9ea3a8";
+              if (typeof avgSpeed === "number") {
+                const limit = e.speedLimit || 13.89;
+                const ratio = Math.max(0, Math.min(1, avgSpeed / Math.max(limit, 0.1)));
+                if (ratio >= 0.7) color = "#25A244"; // green
+                else if (ratio >= 0.4) color = "#FB8C00"; // orange
+                else color = "#D7263D"; // red
+              }
+              return (
+                <Polyline
+                  key={`edge_cong_${e.id}`}
+                  positions={e.points}
+                  color={color}
+                  weight={6}
+                  opacity={0.9}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+              );
+            })}
 
             {/* Traffic Lights from .net.xml (junctions) */}
             {mapView === "traffic" && Array.isArray(sumoNetData.tls) &&
@@ -804,6 +918,22 @@ const TrafficMap = () => {
                   </Popup>
                 </Marker>
               ))}
+
+            {/* Live vehicles from SUMO on CRS.Simple (use net coords y,x) */}
+            {Array.isArray(mapData.vehicles) &&
+              mapData.vehicles
+                .filter((v) => typeof v.netLat === "number" && typeof v.netLng === "number")
+                .map((v) => (
+                  <Marker key={v.id} position={[v.netLat, v.netLng]} icon={createVehicleIcon(v)}>
+                    <Popup>
+                      <div>
+                        <div><strong>Vehicle {v.id}</strong></div>
+                        {typeof v.speed === "number" && <div>Speed: {v.speed.toFixed(1)} m/s</div>}
+                        {typeof v.type === "string" && <div>Type: {v.type}</div>}
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
           </MapContainer>
         </div>
       </div>
