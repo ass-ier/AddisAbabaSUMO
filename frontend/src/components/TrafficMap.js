@@ -444,7 +444,7 @@ const TrafficMap = () => {
       .catch(() => {});
 
     // socket connection
-    socketRef.current = io("http://localhost:5000");
+    socketRef.current = io("http://localhost:5001");
     socketRef.current.emit("getStatus");
 
     // Network geometry (lanes) arrives first with type 'net'

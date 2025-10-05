@@ -84,7 +84,7 @@ popd >nul 2>&1
 echo.
 echo ------------------------------------------------------------
 echo Launch initiated.
-echo - Backend:  http://localhost:5000/
+echo - Backend:  http://localhost:5001/
 echo - Frontend: http://localhost:3000/
 echo If windows did not open, check for errors above.
 echo ------------------------------------------------------------
