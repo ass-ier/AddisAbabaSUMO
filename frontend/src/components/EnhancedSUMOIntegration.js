@@ -400,7 +400,7 @@ const EnhancedSUMOIntegration = () => {
 
       const payload = { command, parameters: {} };
       if (action === "start") {
-        payload.parameters = { stepLength: config.stepLength };
+        payload.parameters = { stepLength: config.stepLength, startWithGui: true };
       }
       const response = await axios.post("/api/sumo/control", payload, {
         withCredentials: true,

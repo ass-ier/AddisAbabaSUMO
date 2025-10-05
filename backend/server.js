@@ -877,12 +877,10 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             candidates.push("python", "python3");
             for (const cmd of candidates) {
               if (!cmd) continue;
-              // If absolute path, ensure it exists
               if (cmd.includes(":") || cmd.includes("/") || cmd.includes("\\")) {
                 if (fs.existsSync(cmd)) return cmd;
                 continue;
               }
-              // Likely on PATH
               return cmd;
             }
             return "python";
@@ -891,29 +889,76 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           const pythonExe = selectPythonCommand();
           const bridgePath = require("path").join(__dirname, "sumo_bridge.py");
           const env = { ...process.env };
-          // Ensure SUMO tools are on PYTHONPATH for traci
           if (process.env.SUMO_HOME) {
+            const pathMod = require('path');
             env.PYTHONPATH = [
               env.PYTHONPATH || "",
-              require("path").join(process.env.SUMO_HOME, "tools"),
+              pathMod.join(process.env.SUMO_HOME, "tools"),
             ]
               .filter(Boolean)
-              .join(require("path").delimiter);
+              .join(pathMod.delimiter);
+            // Ensure SUMO bin is on PATH so "sumo" resolves if used
+            const sumoBin = pathMod.join(process.env.SUMO_HOME, 'bin');
+            env.PATH = [sumoBin, env.PATH || process.env.PATH || ""].filter(Boolean).join(pathMod.delimiter);
           }
 
-          // Decide whether to launch with GUI based on settings
+          // Decide whether to launch with GUI
           let startWithGuiFlag = false;
-          try {
-            const s = await Settings.findOne();
-            startWithGuiFlag = !!(s && s.sumo && s.sumo.startWithGui);
-          } catch (_) {}
+          if (typeof parameters.startWithGui === 'boolean') {
+            startWithGuiFlag = parameters.startWithGui;
+          } else {
+            try {
+              const s = await Settings.findOne();
+              startWithGuiFlag = !!(s && s.sumo && s.sumo.startWithGui);
+            } catch (_) {}
+          }
 
-          const selectedBinary = startWithGuiFlag
-            ? process.env.SUMO_BINARY_GUI_PATH ||
-              (process.platform === "win32" ? "sumo-gui.exe" : "sumo-gui")
-            : process.env.SUMO_BINARY_PATH ||
-              (process.platform === "win32" ? "sumo.exe" : "sumo");
+          function fileExists(p) {
+            try { return !!p && require('fs').existsSync(p); } catch { return false; }
+          }
+          function resolveSumoBinary(sel, wantGui) {
+            const fs = require('fs');
+            const path = require('path');
+            const isAbs = sel && (sel.includes(':') || sel.includes('/') || sel.includes('\\'));
+            if (isAbs && fileExists(sel)) return sel;
+            // Try SUMO_HOME/bin
+            if (process.env.SUMO_HOME) {
+              const bin = path.join(process.env.SUMO_HOME, 'bin',
+                process.platform === 'win32' ? (wantGui ? 'sumo-gui.exe' : 'sumo.exe') : (wantGui ? 'sumo-gui' : 'sumo')
+              );
+              if (fileExists(bin)) return bin;
+            }
+            // Fallback to name on PATH
+            return wantGui ? (process.platform === 'win32' ? 'sumo-gui.exe' : 'sumo-gui') : (process.platform === 'win32' ? 'sumo.exe' : 'sumo');
+          }
 
+          const selectedBinary = resolveSumoBinary(
+            startWithGuiFlag ? process.env.SUMO_BINARY_GUI_PATH : process.env.SUMO_BINARY_PATH,
+            !!startWithGuiFlag
+          );
+
+          const fsCheck = require('fs');
+          if (!fsCheck.existsSync(cfgPathEffective)) {
+            io.emit("simulationLog", { level: "error", message: `SUMO config not found: ${cfgPathEffective}`, ts: Date.now() });
+            status.isRunning = false;
+            status.lastUpdated = new Date();
+            await status.save();
+            io.emit("simulationStatus", status);
+            return res.status(400).json({ message: "SUMO config not found" });
+          }
+          if (!(selectedBinary && (selectedBinary.includes(':') || selectedBinary.includes('/') || selectedBinary.includes('\\')))) {
+            // If using name on PATH, that's fine. Otherwise verify absolute path exists (handled above in resolve)
+          } else if (!fsCheck.existsSync(selectedBinary)) {
+            io.emit("simulationLog", { level: "error", message: `SUMO binary not found: ${selectedBinary}`, ts: Date.now() });
+            status.isRunning = false;
+            status.lastUpdated = new Date();
+            await status.save();
+            io.emit("simulationStatus", status);
+            return res.status(400).json({ message: "SUMO binary not found" });
+          }
+
+          const settingsDoc = await Settings.findOne();
+          const stepLen = settingsDoc?.sumo?.stepLength || 1.0;
           const args = [
             bridgePath,
             "--sumo-bin",
@@ -921,14 +966,30 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             "--sumo-cfg",
             cfgPathEffective,
             "--step-length",
-            String((await Settings.findOne())?.sumo?.stepLength || 1.0),
+            String(stepLen),
           ];
 
           sumoBridgeProcess = spawn(pythonExe, args, { env });
 
+          // Announce launch
+          io.emit("simulationLog", {
+            level: "info",
+            message: `Launching SUMO (${selectedBinary}) config=${cfgPathEffective} step=${stepLen}`,
+            ts: Date.now(),
+          });
+          if (sumoBridgeProcess.pid) {
+            io.emit("simulationLog", {
+              level: "info",
+              message: `SUMO bridge PID=${sumoBridgeProcess.pid}`,
+              ts: Date.now(),
+            });
+          }
+
           // Prevent crash on spawn errors and reflect status
           sumoBridgeProcess.on("error", async (err) => {
-            console.error("[SUMO BRIDGE] spawn error:", err?.message || err);
+            const msg = err?.message || String(err);
+            console.error("[SUMO BRIDGE] spawn error:", msg);
+            io.emit("simulationLog", { level: "error", message: `Bridge spawn error: ${msg}` , ts: Date.now() });
             try {
               status.isRunning = false;
               status.endTime = new Date();
@@ -939,6 +1000,7 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           });
 
           let buffer = "";
+          let lastStepLog = 0;
           sumoBridgeProcess.stdout.on("data", (chunk) => {
             buffer += chunk.toString();
             let index;
@@ -990,8 +1052,28 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
                 }
                 // Broadcast visualization and also lightweight stats
                 io.emit("viz", payload);
-                if (typeof payload.step === "number") {
+
+                // Periodic console-like log (every 50 steps)
+                if (payload.type === "viz" && typeof payload.step === "number") {
                   status.currentStep = payload.step;
+                  if (payload.step >= lastStepLog + 50) {
+                    const vCount = Array.isArray(payload.vehicles) ? payload.vehicles.length : 0;
+                    const tlsCount = Array.isArray(payload.tls) ? payload.tls.length : 0;
+                    let avgSpeed = 0;
+                    if (vCount > 0) {
+                      let sum = 0;
+                      for (const v of payload.vehicles) {
+                        if (typeof v.speed === 'number') sum += v.speed;
+                      }
+                      avgSpeed = Number((sum / vCount).toFixed(2));
+                    }
+                    io.emit("simulationLog", {
+                      level: "info",
+                      message: `Step ${payload.step} | vehicles=${vCount} avgSpeed=${avgSpeed}m/s tls=${tlsCount}`,
+                      ts: Date.now(),
+                    });
+                    lastStepLog = payload.step;
+                  }
                 }
               } catch (e) {
                 // ignore malformed line
@@ -1002,6 +1084,7 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           sumoBridgeProcess.stderr.on("data", (chunk) => {
             const msg = chunk.toString();
             console.error("[SUMO BRIDGE]", msg);
+            io.emit("simulationLog", { level: "warn", message: msg.trim(), ts: Date.now() });
           });
 
           sumoBridgeProcess.on("exit", (code) => {
@@ -1010,10 +1093,12 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             status.endTime = new Date();
             status.lastUpdated = new Date();
             status.save().then(() => io.emit("simulationStatus", status));
+            io.emit("simulationLog", { level: (code === 0 ? "info" : "error"), message: `SUMO bridge exited with code ${code}`, ts: Date.now() });
             console.log(`SUMO bridge exited with code ${code}`);
           });
         } catch (err) {
           console.error("Failed to start SUMO bridge:", err);
+          io.emit("simulationLog", { level: "error", message: `Failed to start SUMO bridge: ${err?.message || err}`, ts: Date.now() });
         }
 
         await recordAudit(req, "start_simulation", "sumo", parameters);
