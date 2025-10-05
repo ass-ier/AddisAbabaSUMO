@@ -295,16 +295,6 @@ const EnhancedSUMOIntegration = () => {
       name: "Night Traffic",
       description: "Low density night simulation",
     },
-    {
-      id: "emergency",
-      name: "Emergency Response",
-      description: "Emergency vehicle priority",
-    },
-    {
-      id: "construction",
-      name: "Construction Zone",
-      description: "Reduced capacity simulation",
-    },
   ]);
 
   const socketRef = useRef(null);
