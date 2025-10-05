@@ -15,9 +15,12 @@ const EnhancedSUMOIntegration = () => {
     totalSteps: 0,
     currentTime: 0,
     speed: 1.0,
-    mode: "fixed", // fixed, adaptive
+    mode: "fixed", // fixed, rl (UI label only)
     scenario: "default",
   });
+
+  // Light control toggle: 'fixed' (SUMO default programs from net.xml) or 'rl' (PPO BestModel)
+  const [lightControlMode, setLightControlMode] = useState("fixed");
 
   // Configuration State
   const [config, setConfig] = useState({
@@ -390,13 +393,25 @@ const EnhancedSUMOIntegration = () => {
 
       const payload = { command, parameters: {} };
       if (action === "start") {
-        payload.parameters = { stepLength: config.stepLength, startWithGui: true };
+        // Base SUMO parameters; do not include RL switches unless RL is selected
+        payload.parameters = {
+          stepLength: config.stepLength,
+          startWithGui: true,
+        };
+
+        if (lightControlMode === "rl") {
+          // Use BestModel for RL; relative to project root so backend can resolve
+          // You can adjust this path if you prefer a different model
+          payload.parameters.useRL = true;
+          payload.parameters.rlModelPath = "Sumoconfigs/experiments/targeted_addis_ppo_20251003_031746/models/best_model/best_model.zip";
+          payload.parameters.rlDelta = 15; // decision interval (s)
+        }
       }
       const response = await axios.post("/api/sumo/control", payload, {
         withCredentials: true,
       });
-      setSimulationStatus((prev) => ({ ...prev, ...response.data.data }));
-      addLog(`Simulation ${action} command executed successfully`, "success");
+      setSimulationStatus((prev) => ({ ...prev, ...response.data.data, mode: lightControlMode }));
+      addLog(`Simulation ${action} command executed successfully (${lightControlMode.toUpperCase()} control)`, "success");
     } catch (error) {
       console.error(`Error ${action}ing simulation:`, error);
       addLog(`Failed to ${action} simulation: ${error.message}`, "error");
@@ -565,6 +580,33 @@ const EnhancedSUMOIntegration = () => {
                       {simulationStatus.speed}x
                     </span>
                   </div>
+                </div>
+              </div>
+
+              {/* Light Control Mode */}
+              <div className="config-section" style={{ marginBottom: 16 }}>
+                <h4>Light Control</h4>
+                <div className="config-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                  <label className="config-item" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="radio"
+                      name="lightControlMode"
+                      value="fixed"
+                      checked={lightControlMode === "fixed"}
+                      onChange={() => setLightControlMode("fixed")}
+                    />
+                    <span>Fixed time (from AddisAbaba.net.xml)</span>
+                  </label>
+                  <label className="config-item" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="radio"
+                      name="lightControlMode"
+                      value="rl"
+                      checked={lightControlMode === "rl"}
+                      onChange={() => setLightControlMode("rl")}
+                    />
+                    <span>RL (BestModel)</span>
+                  </label>
                 </div>
               </div>
 

@@ -32,6 +32,16 @@ else:
 import traci
 import sumolib
 
+# Safe print for Windows consoles that can't encode emojis
+def _safe_print(msg):
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        try:
+            print(str(msg).encode('ascii', 'ignore').decode('ascii'))
+        except Exception:
+            pass
+
 class TargetedTrafficLightManager:
     """Enhanced traffic light manager for specific intersections"""
     
@@ -63,7 +73,7 @@ class TargetedTrafficLightManager:
         self.controlled_lanes = self._get_controlled_lanes()
         self.green_phases = self._identify_green_phases()
         
-        print(f"📍 TLS {tls_id}: {len(self.controlled_lanes)} lanes, {len(self.green_phases)} green phases")
+        _safe_print(f"TLS {tls_id}: {len(self.controlled_lanes)} lanes, {len(self.green_phases)} green phases")
         
     def _get_controlled_lanes(self) -> List[str]:
         """Get lanes controlled by this traffic light"""
@@ -235,7 +245,7 @@ class AddisTargetedEnvironment(gym.Env):
             low=0.0, high=1.0, shape=(607,), dtype=np.float32
         )
         
-        print(f"🎯 Targeting {n_tls} specific traffic lights: {', '.join(self.target_tls_ids)}")
+        _safe_print(f"Targeting {n_tls} specific traffic lights: {', '.join(self.target_tls_ids)}")
         
     def _start_sumo(self):
         """Start SUMO simulation"""
@@ -246,13 +256,14 @@ class AddisTargetedEnvironment(gym.Env):
             "--time-to-teleport", "600",
             "--no-step-log", "true",
             "--no-warnings", "true",
-            "--duration-log.disable", "true"
+            "--duration-log.disable", "true",
+            "--start"
         ])
         
         try:
             traci.start(sumo_cmd)
         except Exception as e:
-            print(f"Error starting SUMO: {e}")
+            _safe_print(f"Error starting SUMO: {e}")
             raise
     
     def _detect_and_initialize_target_tls(self):
@@ -281,16 +292,16 @@ class AddisTargetedEnvironment(gym.Env):
                         found_tls.append(target_id)
                         
                 except Exception as e:
-                    print(f"❌ Could not initialize {target_id}: {e}")
+                    _safe_print(f"Could not initialize {target_id}: {e}")
                     missing_tls.append(target_id)
             else:
                 missing_tls.append(target_id)
         
         if missing_tls:
-            print(f"⚠️  Missing TLS: {missing_tls}")
-            print(f"Available TLS that might match: {[tls for tls in all_tls_ids if any(target in tls.lower() for target in missing_tls)]}")
+            _safe_print(f"Missing TLS: {missing_tls}")
+            _safe_print(f"Available TLS that might match: {[tls for tls in all_tls_ids if any(target in tls.lower() for target in missing_tls)]}")
         
-        print(f"✅ Successfully initialized {len(found_tls)} targeted traffic lights")
+        _safe_print(f"Successfully initialized {len(found_tls)} targeted traffic lights")
         return found_tls
     
     def reset(self, seed=None, options=None):
@@ -308,6 +319,11 @@ class AddisTargetedEnvironment(gym.Env):
         # Let SUMO stabilize
         for _ in range(3):
             traci.simulationStep()
+        try:
+            expected = traci.simulation.getMinExpectedNumber()
+        except:
+            expected = -1
+        _safe_print(f"Reset: after warmup steps, expected vehicles={expected}")
         
         found_tls = self._detect_and_initialize_target_tls()
         
@@ -330,6 +346,11 @@ class AddisTargetedEnvironment(gym.Env):
     
     def step(self, actions):
         """Execute environment step"""
+        # Debug: print pre-step expected
+        try:
+            _safe_print(f"STEP: begin sim_step={self.simulation_step} expected={traci.simulation.getMinExpectedNumber()}")
+        except:
+            _safe_print(f"STEP: begin sim_step={self.simulation_step} expected=?")
         # Normalize actions
         if actions is None:
             actions = []
@@ -361,9 +382,19 @@ class AddisTargetedEnvironment(gym.Env):
         total_reward = np.mean(rewards) if rewards else 0
         self.episode_reward += total_reward
         
-        # Check termination
-        done = (self.simulation_step >= self.num_seconds or 
-                traci.simulation.getMinExpectedNumber() <= 0)
+        # Check termination with warmup guard to avoid premature stop before vehicles spawn
+        min_warmup = 60  # seconds
+        remaining = 0
+        try:
+            remaining = traci.simulation.getMinExpectedNumber()
+        except:
+            remaining = 0
+        time_done = self.simulation_step >= self.num_seconds
+        empty_done = (self.simulation_step >= min_warmup and remaining <= 0)
+        done = time_done or empty_done
+        if done:
+            reason = "time" if time_done else f"empty_after_warmup expected={remaining}"
+            _safe_print(f"STEP: done at sim_step={self.simulation_step} reason={reason}")
         
         info = self._get_info()
         

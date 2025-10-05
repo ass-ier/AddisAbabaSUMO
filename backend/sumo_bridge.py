@@ -28,6 +28,10 @@ def parse_args():
     parser.add_argument('--sumo-bin', required=False, default='sumo')
     parser.add_argument('--sumo-cfg', required=True)
     parser.add_argument('--step-length', required=False, default='1.0')
+    # Optional RL control
+    parser.add_argument('--rl-model', required=False, default=None, help='Path to SB3 PPO model (.zip) for targeted env')
+    parser.add_argument('--rl-delta', required=False, type=int, default=15, help='Decision interval (seconds) for RL env')
+    parser.add_argument('--rl-use-gui', action='store_true', help='Use SUMO GUI for RL env')
     return parser.parse_args()
 
 
@@ -83,6 +87,138 @@ def build_network_payload(net_path):
 def main():
     args = parse_args()
 
+    # RL mode: run targeted env with PPO model controlling traffic lights
+    if args.rl_model:
+        try:
+            from stable_baselines3 import PPO
+            # Import targeted env from Sumoconfigs or current path
+            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+            # Also include project Sumoconfigs (one level up)
+            project_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+            sumo_confs = os.path.join(project_root, 'Sumoconfigs')
+            if os.path.isdir(sumo_confs) and sumo_confs not in sys.path:
+                sys.path.append(sumo_confs)
+            from addis_targeted_env import AddisTargetedEnvironment
+        except Exception as e:
+            print(json.dumps({"type": "error", "message": f"Failed to import RL env/model: {e}"}))
+            sys.stdout.flush()
+            sys.exit(1)
+
+        # Emit static net payload once
+        net_path = resolve_net_path_from_cfg(args.sumo_cfg)
+        geo_ref = None
+        if net_path:
+            net_payload = build_network_payload(net_path)
+            try:
+                net = readNet(net_path)
+                if hasattr(net, 'convertXY2LonLat'):
+                    geo_ref = net
+                    for lane in net_payload.get('lanes', []):
+                        lonlat = []
+                        for pt in lane['points']:
+                            lon, lat = net.convertXY2LonLat(pt['x'], pt['y'])
+                            lonlat.append({'lon': float(lon), 'lat': float(lat)})
+                        lane['lonlat'] = lonlat
+                    b = net_payload['bounds']
+                    minLon, minLat = net.convertXY2LonLat(b['minX'], b['minY'])
+                    maxLon, maxLat = net.convertXY2LonLat(b['maxX'], b['maxY'])
+                    net_payload['geoBounds'] = {
+                        'minLon': float(minLon), 'minLat': float(minLat),
+                        'maxLon': float(maxLon), 'maxLat': float(maxLat)
+                    }
+            except Exception:
+                pass
+            print(json.dumps(net_payload))
+            sys.stdout.flush()
+
+        # Initialize env and model
+        env = AddisTargetedEnvironment(
+            sumocfg_file=args.sumo_cfg,
+            use_gui=bool(args.rl_use_gui),
+            num_seconds=7200,
+            delta_time=int(args.rl_delta),
+            control_mode='rl'
+        )
+        model = PPO.load(args.rl_model, device='cpu')
+
+        # Reset and run loop
+        obs, info = env.reset()
+        step = 0
+        try:
+            while True:
+                action, _ = model.predict(obs, deterministic=True)
+                obs, reward, done, truncated, info = env.step(action)
+                step = info.get('simulation_step', step + int(args.rl_delta))
+
+                # Collect vehicles
+                vehicles = []
+                try:
+                    ids = traci.vehicle.getIDList()
+                    for vid in ids:
+                        x, y = traci.vehicle.getPosition(vid)
+                        speed = traci.vehicle.getSpeed(vid)
+                        ang = traci.vehicle.getAngle(vid)
+                        item = {'id': vid, 'x': x, 'y': y, 'speed': speed, 'angle': ang}
+                        if geo_ref is not None:
+                            try:
+                                lon, lat = geo_ref.convertXY2LonLat(x, y)
+                                item['lon'] = float(lon); item['lat'] = float(lat)
+                            except Exception:
+                                pass
+                        vehicles.append(item)
+                except Exception:
+                    pass
+
+                # Collect TLS states
+                tls_states = []
+                try:
+                    for tls_id in traci.trafficlight.getIDList():
+                        state = traci.trafficlight.getRedYellowGreenState(tls_id)
+                        tls_obj = {'id': tls_id, 'state': state}
+                        if geo_ref is not None:
+                            try:
+                                controlled_lanes = traci.trafficlight.getControlledLanes(tls_id)
+                                xs, ys, count = 0.0, 0.0, 0
+                                for ln in controlled_lanes:
+                                    try:
+                                        shape = traci.lane.getShape(ln)
+                                        if shape:
+                                            xs += float(shape[0][0]); ys += float(shape[0][1]); count += 1
+                                    except Exception:
+                                        continue
+                                if count > 0:
+                                    x = xs / count; y = ys / count
+                                    lon, lat = geo_ref.convertXY2LonLat(x, y)
+                                    tls_obj['lon'] = float(lon); tls_obj['lat'] = float(lat)
+                            except Exception:
+                                pass
+                        tls_states.append(tls_obj)
+                except Exception:
+                    pass
+
+                payload = {
+                    'type': 'viz',
+                    'step': step,
+                    'ts': int(time.time() * 1000),
+                    'vehicles': vehicles,
+                    'tls': tls_states
+                }
+                print(json.dumps(payload)); sys.stdout.flush()
+
+                if done or truncated:
+                    break
+        except KeyboardInterrupt:
+            pass
+        except Exception as e:
+            print(json.dumps({"type": "error", "message": str(e)})); sys.stdout.flush()
+        finally:
+            try:
+                env.close()
+            except Exception:
+                pass
+        return
+
+    # Default mode: run bridge without RL control
     sumoBinary = args.sumo_bin
     if sumoBinary.lower() in ['sumo', 'sumo-gui']:
         try:
@@ -148,8 +284,6 @@ def main():
                 length = traci.vehicle.getLength(vid)
                 width = traci.vehicle.getWidth(vid)
                 vtype = traci.vehicle.getTypeID(vid)
-                edge_id = traci.vehicle.getRoadID(vid)
-                lane_id = traci.vehicle.getLaneID(vid)
                 item = {
                     'id': vid,
                     'x': x,
@@ -158,9 +292,7 @@ def main():
                     'angle': ang,
                     'length': length,
                     'width': width,
-                    'type': vtype,
-                    'edgeId': edge_id,
-                    'laneId': lane_id
+                    'type': vtype
                 }
                 if geo_ref is not None:
                     try:
@@ -219,6 +351,10 @@ def main():
         print(json.dumps({"type": "error", "message": str(e)}))
         sys.stdout.flush()
     finally:
+        try:
+            traci.close(False)
+        except Exception:
+            pass
         try:
             traci.close(False)
         except Exception:

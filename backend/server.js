@@ -889,6 +889,8 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           const pythonExe = selectPythonCommand();
           const bridgePath = require("path").join(__dirname, "sumo_bridge.py");
           const env = { ...process.env };
+          // Ensure Python writes UTF-8 to stdout/stderr to avoid Windows cp1252 issues
+          env.PYTHONIOENCODING = env.PYTHONIOENCODING || 'utf-8';
           if (process.env.SUMO_HOME) {
             const pathMod = require('path');
             env.PYTHONPATH = [
@@ -968,6 +970,29 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             "--step-length",
             String(stepLen),
           ];
+
+          // Optional RL control
+          const wantRL = parameters && (parameters.useRL === true || typeof parameters.rlModelPath === 'string');
+          if (wantRL) {
+            const pathMod = require('path');
+            const fs = require('fs');
+            let rlModelPath = parameters.rlModelPath || '';
+            if (!rlModelPath) {
+              // Try a default model location under frontend/public/Sumoconfigs/logs/best_model.zip
+              const defaultModel = pathMod.join(ROOT_DIR, 'frontend', 'public', 'Sumoconfigs', 'logs', 'best_model.zip');
+              if (fs.existsSync(defaultModel)) rlModelPath = defaultModel;
+            } else if (!pathMod.isAbsolute(rlModelPath)) {
+              rlModelPath = pathMod.join(ROOT_DIR, rlModelPath);
+            }
+            if (rlModelPath && fs.existsSync(rlModelPath)) {
+              args.push('--rl-model', rlModelPath);
+              args.push('--rl-delta', String(parameters.rlDelta || 15));
+              if (startWithGuiFlag) args.push('--rl-use-gui');
+              io.emit("simulationLog", { level: 'info', message: `RL control enabled with model ${rlModelPath}`, ts: Date.now() });
+            } else {
+              io.emit("simulationLog", { level: 'warn', message: `RL model not found; running SUMO default logic`, ts: Date.now() });
+            }
+          }
 
           sumoBridgeProcess = spawn(pythonExe, args, { env });
 
@@ -1050,29 +1075,36 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
                     }
                   }
                 }
-                // Broadcast visualization and also lightweight stats
-                io.emit("viz", payload);
+                // Forward log messages from bridge
+                if (payload.type === "log") {
+                  io.emit("simulationLog", { level: payload.level || 'info', message: String(payload.message || ''), ts: Date.now() });
+                }
 
-                // Periodic console-like log (every 50 steps)
-                if (payload.type === "viz" && typeof payload.step === "number") {
-                  status.currentStep = payload.step;
-                  if (payload.step >= lastStepLog + 50) {
-                    const vCount = Array.isArray(payload.vehicles) ? payload.vehicles.length : 0;
-                    const tlsCount = Array.isArray(payload.tls) ? payload.tls.length : 0;
-                    let avgSpeed = 0;
-                    if (vCount > 0) {
-                      let sum = 0;
-                      for (const v of payload.vehicles) {
-                        if (typeof v.speed === 'number') sum += v.speed;
+                // Broadcast visualization and also lightweight stats
+                if (payload.type === "viz") {
+                  io.emit("viz", payload);
+
+                  // Periodic console-like log (every 50 steps)
+                  if (typeof payload.step === "number") {
+                    status.currentStep = payload.step;
+                    if (payload.step >= lastStepLog + 50) {
+                      const vCount = Array.isArray(payload.vehicles) ? payload.vehicles.length : 0;
+                      const tlsCount = Array.isArray(payload.tls) ? payload.tls.length : 0;
+                      let avgSpeed = 0;
+                      if (vCount > 0) {
+                        let sum = 0;
+                        for (const v of payload.vehicles) {
+                          if (typeof v.speed === 'number') sum += v.speed;
+                        }
+                        avgSpeed = Number((sum / vCount).toFixed(2));
                       }
-                      avgSpeed = Number((sum / vCount).toFixed(2));
+                      io.emit("simulationLog", {
+                        level: "info",
+                        message: `Step ${payload.step} | vehicles=${vCount} avgSpeed=${avgSpeed}m/s tls=${tlsCount}`,
+                        ts: Date.now(),
+                      });
+                      lastStepLog = payload.step;
                     }
-                    io.emit("simulationLog", {
-                      level: "info",
-                      message: `Step ${payload.step} | vehicles=${vCount} avgSpeed=${avgSpeed}m/s tls=${tlsCount}`,
-                      ts: Date.now(),
-                    });
-                    lastStepLog = payload.step;
                   }
                 }
               } catch (e) {
