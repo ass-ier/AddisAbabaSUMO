@@ -88,6 +88,16 @@ export const api = {
       body: JSON.stringify({ withConfig }),
     }),
 
+  // SUMO config selection
+  listSumoConfigs: async () =>
+    fetchJson("/api/sumo/configs", { headers: authHeaders() }),
+  setSumoConfig: async (name) =>
+    fetchJson("/api/sumo/config", {
+      method: "PUT",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name }),
+    }),
+
   // Map settings (mode, area filter)
   getMapSettings: async () =>
     fetchJson("/api/map/settings", { headers: authHeaders() }),

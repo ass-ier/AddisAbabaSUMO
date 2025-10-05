@@ -21,6 +21,16 @@ const io = socketIo(server, {
 
 const PORT = process.env.PORT || 5000;
 
+// Paths and helpers for SUMO configs located in frontend/public/Sumoconfigs
+const ROOT_DIR = path.join(__dirname, "..");
+const DEFAULT_SUMO_CONFIG_DIR = path.join(ROOT_DIR, "frontend", "public", "Sumoconfigs");
+function resolveSumoConfigPath(nameOrPath) {
+  if (!nameOrPath) return path.join(DEFAULT_SUMO_CONFIG_DIR, "AddisAbabaSimple.sumocfg");
+  // If absolute or contains drive letter on Windows, return as-is
+  if (path.isAbsolute(nameOrPath)) return nameOrPath;
+  return path.join(DEFAULT_SUMO_CONFIG_DIR, nameOrPath);
+}
+
 // Middleware
 app.use(
   cors({
@@ -94,6 +104,8 @@ const settingsSchema = new mongoose.Schema({
   sumo: {
     stepLength: { type: Number, default: 1.0 },
     startWithGui: { type: Boolean, default: false },
+    selectedConfig: { type: String, default: "AddisAbabaSimple.sumocfg" },
+    configDir: { type: String, default: DEFAULT_SUMO_CONFIG_DIR },
   },
   adaptive: {
     enabled: { type: Boolean, default: true },
@@ -737,6 +749,50 @@ app.get(
   }
 );
 
+// SUMO config endpoints
+app.get("/api/sumo/configs", authenticateToken, async (req, res) => {
+  try {
+    const fs = require("fs");
+    const dir = DEFAULT_SUMO_CONFIG_DIR;
+    const files = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isFile() && d.name.toLowerCase().endsWith(".sumocfg"))
+      .map((d) => d.name)
+      .sort();
+    let selected = null;
+    try {
+      const s = await Settings.findOne();
+      selected = s?.sumo?.selectedConfig || null;
+    } catch (_) {}
+    res.json({ directory: dir, files, selected });
+  } catch (e) {
+    res.status(500).json({ message: "Failed to list SUMO configs", error: e.message });
+  }
+});
+
+app.put("/api/sumo/config", authenticateToken, requireAnyRole(["super_admin", "admin"]), async (req, res) => {
+  try {
+    const { name } = req.body || {};
+    if (!name || typeof name !== "string" || !name.endsWith(".sumocfg")) {
+      return res.status(400).json({ message: "Invalid config name" });
+    }
+    const fs = require("fs");
+    const fullPath = path.join(DEFAULT_SUMO_CONFIG_DIR, name);
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ message: "Config not found" });
+    }
+    const s = await Settings.findOneAndUpdate(
+      {},
+      { $set: { "sumo.selectedConfig": name, "sumo.configDir": DEFAULT_SUMO_CONFIG_DIR, updatedAt: new Date() } },
+      { new: true, upsert: true }
+    );
+    await recordAudit(req, "set_sumo_config", name);
+    res.json({ ok: true, selected: s?.sumo?.selectedConfig || name });
+  } catch (e) {
+    res.status(500).json({ message: "Failed to set SUMO config", error: e.message });
+  }
+});
+
 // SUMO integration endpoints
 app.get("/api/sumo/status", authenticateToken, async (req, res) => {
   try {
@@ -771,9 +827,18 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             .json({ message: "Simulation is already running" });
         }
 
+        // Determine config path: prefer Settings.sumo.selectedConfig; fallback to env
+        let selectedConfigName = null;
+        try {
+          const s = await Settings.findOne();
+          selectedConfigName = s?.sumo?.selectedConfig || null;
+        } catch (_) {}
+        const envCfg = process.env.SUMO_CONFIG_PATH || "";
+        const cfgPathEffective = resolveSumoConfigPath(selectedConfigName || envCfg);
+
         status.isRunning = true;
         status.startTime = new Date();
-        status.configPath = process.env.SUMO_CONFIG_PATH;
+        status.configPath = cfgPathEffective;
         status.currentStep = 0;
         status.totalSteps = 10800; // 3 hours default
         status.lastUpdated = new Date();
@@ -784,7 +849,26 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
 
         // Spawn SUMO TraCI bridge (Python)
         try {
-          const pythonExe = process.env.PYTHON_EXE || "python";
+          const fs = require("fs");
+          function selectPythonCommand() {
+            const candidates = [];
+            if (process.env.PYTHON_EXE) candidates.push(process.env.PYTHON_EXE);
+            if (process.platform === "win32") candidates.push("py");
+            candidates.push("python", "python3");
+            for (const cmd of candidates) {
+              if (!cmd) continue;
+              // If absolute path, ensure it exists
+              if (cmd.includes(":") || cmd.includes("/") || cmd.includes("\\")) {
+                if (fs.existsSync(cmd)) return cmd;
+                continue;
+              }
+              // Likely on PATH
+              return cmd;
+            }
+            return "python";
+          }
+
+          const pythonExe = selectPythonCommand();
           const bridgePath = require("path").join(__dirname, "sumo_bridge.py");
           const env = { ...process.env };
           // Ensure SUMO tools are on PYTHONPATH for traci
@@ -815,12 +899,24 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             "--sumo-bin",
             selectedBinary,
             "--sumo-cfg",
-            process.env.SUMO_CONFIG_PATH || "",
+            cfgPathEffective,
             "--step-length",
-            "1.0",
+            String((await Settings.findOne())?.sumo?.stepLength || 1.0),
           ];
 
           sumoBridgeProcess = spawn(pythonExe, args, { env });
+
+          // Prevent crash on spawn errors and reflect status
+          sumoBridgeProcess.on("error", async (err) => {
+            console.error("[SUMO BRIDGE] spawn error:", err?.message || err);
+            try {
+              status.isRunning = false;
+              status.endTime = new Date();
+              status.lastUpdated = new Date();
+              await status.save();
+            } catch (_) {}
+            io.emit("simulationStatus", status);
+          });
 
           let buffer = "";
           sumoBridgeProcess.stdout.on("data", (chunk) => {
@@ -999,7 +1095,13 @@ app.post(
   async (req, res) => {
     try {
       const startWithCfg = req.body?.withConfig !== false; // default true
-      const cfgPath = process.env.SUMO_CONFIG_PATH || "";
+      // Resolve from settings or env
+      let selectedConfigName = null;
+      try {
+        const s = await Settings.findOne();
+        selectedConfigName = s?.sumo?.selectedConfig || null;
+      } catch (_) {}
+      const cfgPath = resolveSumoConfigPath(selectedConfigName || process.env.SUMO_CONFIG_PATH || "");
       const guiBinary =
         process.env.SUMO_BINARY_GUI_PATH ||
         (process.platform === "win32" ? "sumo-gui.exe" : "sumo-gui");

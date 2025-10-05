@@ -309,6 +309,26 @@ const EnhancedSUMOIntegration = () => {
 
   const socketRef = useRef(null);
 
+  // SUMO config list/state
+  const [sumoConfigs, setSumoConfigs] = useState({ files: [], selected: "" });
+  const loadSumoConfigs = async () => {
+    try {
+      const res = await axios.get("/api/sumo/configs", { withCredentials: true });
+      setSumoConfigs({ files: res.data?.files || [], selected: res.data?.selected || "" });
+    } catch (e) {
+      // ignore
+    }
+  };
+  const setSumoConfig = async (name) => {
+    try {
+      await axios.put("/api/sumo/config", { name }, { withCredentials: true });
+      setSumoConfigs((prev) => ({ ...prev, selected: name }));
+      addLog(`SUMO config set to ${name}`, "success");
+    } catch (e) {
+      addLog(`Failed to set SUMO config: ${e.message}`, "error");
+    }
+  };
+
   useEffect(() => {
     // Initialize socket connection
     socketRef.current = io("http://localhost:5000");
@@ -333,6 +353,7 @@ const EnhancedSUMOIntegration = () => {
 
     // Fetch initial status
     fetchSimulationStatus();
+    loadSumoConfigs();
 
     return () => {
       if (socketRef.current) {
@@ -364,6 +385,19 @@ const EnhancedSUMOIntegration = () => {
       };
       const command = commandMap[action];
       if (!command) throw new Error("Invalid action");
+
+      // If starting, map selected scenario to sumocfg and set it before starting
+      if (action === "start") {
+        const scenarioMap = {
+          default: "AddisAbabaSimple.sumocfg",
+          rush_hour: "AddisAbabaSimple_peak.sumocfg",
+          night: "AddisAbabaSimple_offpeak.sumocfg",
+        };
+        const sc = simulationStatus.scenario || "default";
+        const cfgName = scenarioMap[sc] || scenarioMap.default;
+        await setSumoConfig(cfgName);
+      }
+
       const payload = { command, parameters: {} };
       if (action === "start") {
         payload.parameters = { stepLength: config.stepLength };
@@ -542,6 +576,22 @@ const EnhancedSUMOIntegration = () => {
                     </span>
                   </div>
                 </div>
+              </div>
+
+              {/* SUMO Config Selection */}
+              <div className="config-select" style={{ marginBottom: 12 }}>
+                <label style={{ marginRight: 8 }}>SUMO Config:</label>
+                <select
+                  value={sumoConfigs.selected || ""}
+                  onChange={(e) => setSumoConfig(e.target.value)}
+                  style={{ padding: 6, minWidth: 260 }}
+                >
+                  {(sumoConfigs.files || []).map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Control Buttons */}
