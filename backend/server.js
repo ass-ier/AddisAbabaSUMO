@@ -19,7 +19,7 @@ const io = socketIo(server, {
   },
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // Paths and helpers for SUMO configs located in frontend/public/Sumoconfigs
 const ROOT_DIR = path.join(__dirname, "..");

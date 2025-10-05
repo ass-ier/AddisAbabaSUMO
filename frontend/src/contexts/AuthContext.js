@@ -1,6 +1,11 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import axios from "axios";
 
+// Configure axios early so calls from components (login/validate) use correct backend
+const BASE_API = process.env.REACT_APP_API_BASE || "http://localhost:5001";
+axios.defaults.baseURL = BASE_API;
+axios.defaults.withCredentials = true;
+
 const AuthContext = createContext();
 
 export const useAuth = () => {
@@ -12,8 +17,8 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Always send cookies
-    axios.defaults.withCredentials = true;
+    // axios defaults are configured at module scope so requests from child
+    // components during initial render use the correct backend.
 
     // Install a single axios interceptor for auth failures
     const interceptorId = axios.interceptors.response.use(

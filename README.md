@@ -77,7 +77,7 @@ It consists of a Node.js backend (API, SUMO integration) and a React frontend (d
    ```sh
    npm run dev
    ```
-   The backend will start on `http://localhost:5000`.
+   The backend will start on `http://localhost:5001`.
 
 ---
 
@@ -114,7 +114,7 @@ Ensure your SUMO installation is properly configured and the config file path in
 - Open your browser and go to `http://localhost:3000`.
 - Log in or register if required.
 - Use the dashboard to start/stop SUMO simulations, view traffic data, and manage intersections.
-- The backend API runs at `http://localhost:5000` and handles simulation logic and data.
+- The backend API runs at `http://localhost:5001` and handles simulation logic and data.
 
 ---
 

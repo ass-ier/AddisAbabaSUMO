@@ -237,6 +237,7 @@ const TrafficMap = () => {
   // SUMO Net (client-side .net.xml) view state
   const [sumoNetMode, setSumoNetMode] = useState(true);
   const [sumoNetData, setSumoNetData] = useState({ lanes: [], bounds: null, tls: [], junctions: [], junctionPoints: [] });
+  const [simNetLanes, setSimNetLanes] = useState([]); // lanes from running simulation (XY -> CRS.Simple)
   const sumoMapRef = useRef(null);
 
   // Derive leaflet bounds from file bounds or from lane points if absent
@@ -263,24 +264,24 @@ const TrafficMap = () => {
     return L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
   }, [sumoNetData]);
 
-  // Build merged "edge" geometries from lanes to emulate thicker Google-like roads
+  // Build merged "edge" geometries from lanes (prefer live sim lanes for edge-id alignment)
   const edgeGeoms = useMemo(() => {
-    const lanes = Array.isArray(sumoNetData.lanes) ? sumoNetData.lanes : [];
+    const sourceLanes = Array.isArray(simNetLanes) && simNetLanes.length
+      ? simNetLanes
+      : (Array.isArray(sumoNetData.lanes) ? sumoNetData.lanes : []);
     const byEdge = new Map();
-    for (const l of lanes) {
-      const key = l.edgeId || (typeof l.id === 'string' ? String(l.id).split('_')[0] : l.id);
+    for (const l of sourceLanes) {
+      const key = l.edgeId || (typeof l.id === 'string' ? String(l.id).split('_').slice(0, -1).join('_') : l.id);
       if (!key) continue;
       const rec = byEdge.get(key) || { id: key, rep: null, speed: 0 };
-      // choose representative with most points
       if (!rec.rep || (l.points?.length || 0) > (rec.rep.points?.length || 0)) rec.rep = l;
-      if (typeof l.speed === 'number' && l.speed > rec.speed) rec.speed = l.speed; // speed limit approx
+      if (typeof l.speed === 'number' && l.speed > rec.speed) rec.speed = l.speed;
       byEdge.set(key, rec);
     }
-    const edges = Array.from(byEdge.values())
+    return Array.from(byEdge.values())
       .filter((e) => e.rep && Array.isArray(e.rep.points) && e.rep.points.length >= 2)
       .map((e) => ({ id: e.id, points: e.rep.points, speedLimit: e.speed || 13.89 }));
-    return edges;
-  }, [sumoNetData.lanes]);
+  }, [simNetLanes, sumoNetData.lanes]);
 
   // Compute batches for rendering performance
   const edgeBatches = useMemo(() => {
@@ -444,7 +445,7 @@ const TrafficMap = () => {
       .catch(() => {});
 
     // socket connection
-    socketRef.current = io("http://localhost:5000");
+    socketRef.current = io("http://localhost:5001");
     socketRef.current.emit("getStatus");
 
     // Network geometry (lanes) arrives first with type 'net'
@@ -462,6 +463,21 @@ const TrafficMap = () => {
               speed: l.speed,
               length: l.length,
             }));
+          // Also derive CRS.Simple lanes from sim (use XY points)
+          const xyLanes = lanes
+            .filter((l) => Array.isArray(l.points) && l.points.length >= 2)
+            .map((l) => {
+              const deriveEdgeId = (laneId) => {
+                if (typeof laneId !== 'string') return null;
+                const parts = laneId.split('_');
+                if (parts.length <= 1) return laneId;
+                return parts.slice(0, -1).join('_');
+              };
+              const edgeId = deriveEdgeId(l.id);
+              const pts = l.points.map((pt) => [pt.y, pt.x]); // CRS.Simple: [lat=y, lng=x]
+              return { id: l.id, edgeId, points: pts, speed: l.speed };
+            });
+          setSimNetLanes(xyLanes);
           if (payload.geoBounds) next.geoBounds = payload.geoBounds;
         } else if (payload.type === "viz") {
           if (payload.vehicles) {

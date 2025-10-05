@@ -30,29 +30,32 @@ async function fetchJson(url, options = {}) {
   return res.json();
 }
 
+// Base API URL (can be overridden with REACT_APP_API_BASE)
+const BASE_API = process.env.REACT_APP_API_BASE || "http://localhost:5001";
+
 export const api = {
   // Users
-  listUsers: async () => fetchJson("/api/users", { headers: authHeaders() }),
+  listUsers: async () => fetchJson(`${BASE_API}/api/users`, { headers: authHeaders() }),
   createUser: async (body) =>
-    fetchJson("/api/register", {
+    fetchJson(`${BASE_API}/api/register`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify(body),
     }),
   updateUser: async (id, body) =>
-    fetchJson(`/api/users/${id}`, {
+    fetchJson(`${BASE_API}/api/users/${id}`, {
       method: "PUT",
       headers: jsonHeaders(),
       body: JSON.stringify(body),
     }),
   deleteUser: async (id) =>
-    fetchJson(`/api/users/${id}`, { method: "DELETE", headers: authHeaders() }),
+    fetchJson(`${BASE_API}/api/users/${id}`, { method: "DELETE", headers: authHeaders() }),
 
   // Settings
   getSettings: async () =>
-    fetchJson("/api/settings", { headers: authHeaders() }),
+    fetchJson(`${BASE_API}/api/settings`, { headers: authHeaders() }),
   saveSettings: async (body) =>
-    fetchJson("/api/settings", {
+    fetchJson(`${BASE_API}/api/settings`, {
       method: "PUT",
       headers: jsonHeaders(),
       body: JSON.stringify(body),
@@ -61,28 +64,28 @@ export const api = {
   // Audit logs
   listAuditLogs: async (params = {}) => {
     const qs = new URLSearchParams(params).toString();
-    return fetchJson(`/api/audit${qs ? `?${qs}` : ""}`, {
+    return fetchJson(`${BASE_API}/api/audit${qs ? `?${qs}` : ""}`, {
       headers: authHeaders(),
     });
   },
 
   // Reports
   getKpis: async () =>
-    fetchJson("/api/reports/kpis", { headers: authHeaders() }),
+    fetchJson(`${BASE_API}/api/reports/kpis`, { headers: authHeaders() }),
   getTrends: async () =>
-    fetchJson("/api/reports/trends", { headers: authHeaders() }),
+    fetchJson(`${BASE_API}/api/reports/trends`, { headers: authHeaders() }),
 
   // SUMO
   getSumoStatus: async () =>
-    fetchJson("/api/sumo/status", { headers: authHeaders() }),
+    fetchJson(`${BASE_API}/api/sumo/status`, { headers: authHeaders() }),
   sumoControl: async (command, parameters = {}) =>
-    fetchJson("/api/sumo/control", {
+    fetchJson(`${BASE_API}/api/sumo/control`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ command, parameters }),
     }),
   openSumoGui: async (withConfig = true) =>
-    fetchJson("/api/sumo/open-gui", {
+    fetchJson(`${BASE_API}/api/sumo/open-gui`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ withConfig }),
@@ -90,9 +93,9 @@ export const api = {
 
   // SUMO config selection
   listSumoConfigs: async () =>
-    fetchJson("/api/sumo/configs", { headers: authHeaders() }),
+    fetchJson(`${BASE_API}/api/sumo/configs`, { headers: authHeaders() }),
   setSumoConfig: async (name) =>
-    fetchJson("/api/sumo/config", {
+    fetchJson(`${BASE_API}/api/sumo/config`, {
       method: "PUT",
       headers: jsonHeaders(),
       body: JSON.stringify({ name }),
@@ -100,9 +103,9 @@ export const api = {
 
   // Map settings (mode, area filter)
   getMapSettings: async () =>
-    fetchJson("/api/map/settings", { headers: authHeaders() }),
+    fetchJson(`${BASE_API}/api/map/settings`, { headers: authHeaders() }),
   updateMapSettings: async (body) =>
-    fetchJson("/api/map/settings", {
+    fetchJson(`${BASE_API}/api/map/settings`, {
       method: "PUT",
       headers: jsonHeaders(),
       body: JSON.stringify(body),
@@ -110,7 +113,7 @@ export const api = {
 
   // Intersections
   overrideIntersection: async (id, body) =>
-    fetchJson(`/api/intersections/${id}/override`, {
+    fetchJson(`${BASE_API}/api/intersections/${id}/override`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify(body),
@@ -118,9 +121,9 @@ export const api = {
 
   // Emergencies
   listEmergencies: async () =>
-    fetchJson("/api/emergencies", { headers: authHeaders() }),
+    fetchJson(`${BASE_API}/api/emergencies`, { headers: authHeaders() }),
   forceClearEmergency: async (id) =>
-    fetchJson(`/api/emergencies/${id}/force-clear`, {
+    fetchJson(`${BASE_API}/api/emergencies/${id}/force-clear`, {
       method: "POST",
       headers: authHeaders(),
     }),
