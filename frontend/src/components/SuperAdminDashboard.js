@@ -10,6 +10,7 @@ const SuperAdminDashboard = () => {
     systemHealth: 0,
     emergencyCount: 0,
   });
+  const [recentActivities, setRecentActivities] = useState([]);
 
   useEffect(() => {
     (async () => {
@@ -22,6 +23,14 @@ const SuperAdminDashboard = () => {
           if (typeof u.count === "number") userCount = u.count;
         } catch {}
         setStats({ ...data, userCount });
+        // recent activities: 5 most recent audit logs
+        try {
+          const audits = await api.listAuditLogs({ limit: 5 });
+          const items = Array.isArray(audits.items) ? audits.items : [];
+          setRecentActivities(items);
+        } catch (e) {
+          setRecentActivities([]);
+        }
       } catch (err) {
         console.warn('Failed to load overview stats:', err?.message || err);
       }
@@ -59,15 +68,21 @@ const SuperAdminDashboard = () => {
     },
   ];
 
-  const recentActivities = [
-    {
-      id: 1,
-      type: "System",
-      message: "Overview refreshed",
-      timestamp: new Date().toLocaleTimeString(),
-      status: "online",
-    },
-  ];
+  // derive a short, human-readable message for an audit item
+  const formatAudit = (a) => {
+    const when = a.time ? new Date(a.time).toLocaleString() : "";
+    const user = a.user || "unknown";
+    const role = a.role || "";
+    const action = a.action || "";
+    let emoji = "📝";
+    if (action.includes("login")) emoji = "🔐";
+    else if (action.includes("logout")) emoji = "🚪";
+    else if (action.includes("start_simulation")) emoji = "▶️";
+    else if (action.includes("stop_simulation")) emoji = "⏹️";
+    else if (action.includes("pause_simulation")) emoji = "⏸️";
+    else if (action.includes("resume_simulation")) emoji = "▶️";
+    return { id: a._id || when + user + action, emoji, title: action, who: `${user}${role ? ' ('+role+')' : ''}`, when };
+  };
 
   const quickActions = [
     {
@@ -146,28 +161,31 @@ const SuperAdminDashboard = () => {
               <h3 className="text-lg font-semibold">Recent Activities</h3>
             </div>
             <div className="space-y-4">
-              {recentActivities.map((activity) => (
-                <div key={activity.id} className="flex items-start space-x-3">
-                  <div className="flex-shrink-0">
-                    <span className="text-status-online text-lg">✅</span>
-                  </div>
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`badge badge-${getBadgeVariant("online")}`}
-                      >
-                        {activity.type}
-                      </span>
+              {Array.isArray(recentActivities) && recentActivities.length > 0 ? (
+                recentActivities.map((aRaw) => {
+                  const a = formatAudit(aRaw);
+                  return (
+                    <div key={a.id} className="flex items-start space-x-3">
+                      <div className="flex-shrink-0">
+                        <span className="text-lg">{a.emoji}</span>
+                      </div>
+                      <div className="flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`badge badge-default`}>{a.title}</span>
+                        </div>
+                        <p className="text-sm text-foreground">
+                          {a.who}
+                        </p>
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          🕒 {a.when}
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-sm text-foreground">
-                      {activity.message}
-                    </p>
-                    <p className="text-xs text-muted-foreground flex items-center gap-1">
-                      🕒 {activity.timestamp}
-                    </p>
-                  </div>
-                </div>
-              ))}
+                  );
+                })
+              ) : (
+                <div className="text-sm text-muted-foreground">No recent activities</div>
+              )}
             </div>
           </div>
 

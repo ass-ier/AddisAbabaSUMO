@@ -345,6 +345,17 @@ app.post("/api/login", rateLimitLogin, async (req, res) => {
       path: "/",
     });
 
+    // Record audit: login
+    try {
+      await AuditLog.create({
+        user: user.username,
+        role: user.role,
+        action: "login",
+        target: String(user._id),
+        meta: {},
+      });
+    } catch (_) {}
+
     res.json({
       token, // also return for backward compatibility
       user: {
@@ -359,9 +370,18 @@ app.post("/api/login", rateLimitLogin, async (req, res) => {
   }
 });
 
-app.post("/api/logout", authenticateToken, (req, res) => {
+app.post("/api/logout", authenticateToken, async (req, res) => {
   try {
     res.clearCookie("access_token", { path: "/" });
+    try {
+      await AuditLog.create({
+        user: req.user?.username || "unknown",
+        role: req.user?.role || "",
+        action: "logout",
+        target: req.user?.id ? String(req.user.id) : "",
+        meta: {},
+      });
+    } catch (_) {}
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ message: "Server error" });
