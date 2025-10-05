@@ -24,7 +24,7 @@ start "Frontend Server" cmd /k "npm start"
 
 echo.
 echo Traffic Management System is starting...
-echo Backend: http://localhost:5000
+echo Backend: http://localhost:5001
 echo Frontend: http://localhost:3000
 echo.
 echo Default credentials:
