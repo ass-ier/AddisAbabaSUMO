@@ -304,6 +304,21 @@ const TrafficMap = () => {
   // Live congestion map per edge from vehicles (avg speed vs limit)
   const [edgeCongestion, setEdgeCongestion] = useState({});
 
+  // Batch congestion overlay into 3 MultiPolylines (green/orange/red) to avoid thousands of components
+  const congestedClasses = useMemo(() => {
+    const classes = { green: [], orange: [], red: [] };
+    for (const e of edgeGeoms) {
+      const avgSpeed = edgeCongestion[e.id];
+      if (typeof avgSpeed !== 'number') continue;
+      const limit = e.speedLimit || 13.89;
+      const ratio = Math.max(0, Math.min(1, avgSpeed / Math.max(limit, 0.1)));
+      if (ratio >= 0.7) classes.green.push(e.points);
+      else if (ratio >= 0.4) classes.orange.push(e.points);
+      else classes.red.push(e.points);
+    }
+    return classes;
+  }, [edgeGeoms, edgeCongestion]);
+
   // Mock data for demonstration (fallback)
   const mockData = {
     intersections: [
@@ -720,50 +735,8 @@ const TrafficMap = () => {
           {/* Network Source removed: default to SUMO Net view */}
 
           {/* Simulation Controls moved from sidebar */}
-          <div className="control-group">
-            <label>Simulation</label>
-            <div className="action-buttons">
-              <button
-                className="action-btn primary"
-                onClick={() => api.sumoControl("start_simulation").catch(() => {})}
-              >
-                ▶️ Start
-              </button>
-              <button
-                className="action-btn secondary"
-                onClick={() => api.sumoControl("pause_simulation").catch(() => {})}
-              >
-                ⏸️ Pause
-              </button>
-              <button
-                className="action-btn secondary"
-                onClick={() => api.sumoControl("resume_simulation").catch(() => {})}
-              >
-                ▶️ Resume
-              </button>
-              <button
-                className="action-btn secondary"
-                onClick={() => api.sumoControl("stop_simulation").catch(() => {})}
-              >
-                ⏹️ Stop
-              </button>
-            </div>
-          </div>
 
-          {sumoNetMode ? (
-            <div className="control-group">
-              <button
-                className="action-btn secondary"
-                onClick={() => {
-                  if (sumoMapRef.current && sumoBounds) {
-                    sumoMapRef.current.fitBounds(sumoBounds, { padding: [20, 20] });
-                  }
-                }}
-              >
-                Fit Whole Network
-              </button>
-            </div>
-          ) : (
+          {(!sumoNetMode) && (
             <>
               <div className="control-group">
                 <label>
@@ -883,29 +856,16 @@ const TrafficMap = () => {
               />
             ))}
 
-            {/* Optional: overlay dynamic congestion color atop base edges */}
-            {edgeGeoms.map((e) => {
-              const avgSpeed = edgeCongestion[e.id];
-              let color = "#9ea3a8";
-              if (typeof avgSpeed === "number") {
-                const limit = e.speedLimit || 13.89;
-                const ratio = Math.max(0, Math.min(1, avgSpeed / Math.max(limit, 0.1)));
-                if (ratio >= 0.7) color = "#25A244"; // green
-                else if (ratio >= 0.4) color = "#FB8C00"; // orange
-                else color = "#D7263D"; // red
-              }
-              return (
-                <Polyline
-                  key={`edge_cong_${e.id}`}
-                  positions={e.points}
-                  color={color}
-                  weight={6}
-                  opacity={0.9}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-              );
-            })}
+            {/* Optional: overlay dynamic congestion color atop base edges (batched) */}
+            {congestedClasses.green.length > 0 && (
+              <Polyline positions={congestedClasses.green} color="#25A244" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
+            )}
+            {congestedClasses.orange.length > 0 && (
+              <Polyline positions={congestedClasses.orange} color="#FB8C00" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
+            )}
+            {congestedClasses.red.length > 0 && (
+              <Polyline positions={congestedClasses.red} color="#D7263D" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
+            )}
 
             {/* Traffic Lights from .net.xml (junctions) */}
             {mapView === "traffic" && Array.isArray(sumoNetData.tls) &&
