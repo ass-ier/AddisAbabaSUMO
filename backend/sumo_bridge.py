@@ -5,7 +5,7 @@ import json
 import time
 import argparse
 import xml.etree.ElementTree as ET
-from math import cos, sin, radians
+from math import cos, sin, radians, atan2, degrees
 
 # Try to add SUMO tools to path for traci
 if 'SUMO_HOME' in os.environ:
@@ -175,23 +175,140 @@ def main():
                     for tls_id in traci.trafficlight.getIDList():
                         state = traci.trafficlight.getRedYellowGreenState(tls_id)
                         tls_obj = {'id': tls_id, 'state': state}
-                        if geo_ref is not None:
-                            try:
-                                controlled_lanes = traci.trafficlight.getControlledLanes(tls_id)
-                                xs, ys, count = 0.0, 0.0, 0
-                                for ln in controlled_lanes:
+                        # Approximate TLS center from controlled lanes
+                        x_c = None; y_c = None
+                        try:
+                            controlled_lanes = traci.trafficlight.getControlledLanes(tls_id)
+                            xs, ys, count = 0.0, 0.0, 0
+                            for ln in controlled_lanes:
+                                try:
+                                    shape = traci.lane.getShape(ln)
+                                    if shape:
+                                        xs += float(shape[0][0]); ys += float(shape[0][1]); count += 1
+                                except Exception:
+                                    continue
+                            if count > 0:
+                                x_c = xs / count; y_c = ys / count
+                                try:
+                                    tls_obj['cx'] = float(x_c); tls_obj['cy'] = float(y_c)
+                                except Exception:
+                                    pass
+                                if geo_ref is not None:
                                     try:
-                                        shape = traci.lane.getShape(ln)
-                                        if shape:
-                                            xs += float(shape[0][0]); ys += float(shape[0][1]); count += 1
+                                        lon, lat = geo_ref.convertXY2LonLat(x_c, y_c)
+                                        tls_obj['lon'] = float(lon); tls_obj['lat'] = float(lat)
                                     except Exception:
-                                        continue
-                                if count > 0:
-                                    x = xs / count; y = ys / count
-                                    lon, lat = geo_ref.convertXY2LonLat(x, y)
-                                    tls_obj['lon'] = float(lon); tls_obj['lat'] = float(lat)
-                            except Exception:
-                                pass
+                                        pass
+                        except Exception:
+                            pass
+                        # Derive per-side (N,E,S,W) summary from controlled links ordering and current state
+                        try:
+                            links = traci.trafficlight.getControlledLinks(tls_id)
+                            # links is list aligned with state entries
+                            sides = {'N': 'r', 'E': 'r', 'S': 'r', 'W': 'r'}
+                            lane_states = {}
+                            lane_angles = {}
+                            def side_bucket(dx, dy):
+                                ang = degrees(atan2(dy, dx))
+                                if -45 <= ang < 45:
+                                    return 'E'
+                                if 45 <= ang < 135:
+                                    return 'N'
+                                if -135 <= ang < -45:
+                                    return 'S'
+                                return 'W'
+                            def choose(prev, val):
+                                if prev is None:
+                                    return val
+                                if prev == 'g' or val == 'g':
+                                    return 'g'
+                                if prev == 'y' or val == 'y':
+                                    return 'y'
+                                return 'r'
+                            for idx, link_group in enumerate(links):
+                                if idx >= len(state):
+                                    break
+                                if not link_group:
+                                    continue
+                                inLane = link_group[0][0]
+                                try:
+                                    shape = traci.lane.getShape(inLane)
+                                    if shape:
+                                        px, py = shape[-1][0], shape[-1][1]
+                                        if x_c is not None and y_c is not None:
+                                            dx, dy = px - x_c, py - y_c
+                                        else:
+                                            dx, dy = px, py
+                                        side = side_bucket(dx, dy)
+                                        ch = state[idx].lower()
+                                        val = 'g' if ch == 'g' else ('y' if ch == 'y' else 'r')
+                                        cur = sides.get(side, 'r')
+                                        if cur == 'r' or (cur == 'y' and val == 'g'):
+                                            sides[side] = val
+                                        lane_states[inLane] = choose(lane_states.get(inLane), val)
+                                        lane_angles[inLane] = float(degrees(atan2(dy, dx)))
+                                except Exception:
+                                    continue
+                            tls_obj['sides'] = sides
+                            # lanes array for detailed popup rendering (include small shape near center)
+                            lanes_arr = []
+                            for ln in lane_states.keys():
+                                try:
+                                    shp = traci.lane.getShape(ln)
+                                except Exception:
+                                    shp = []
+                                pts = []
+                                try:
+                                    if shp:
+                                        seg = shp[-min(10, len(shp)):]  # last points approaching center
+                                        for px, py in seg:
+                                            pts.append({'x': float(px), 'y': float(py)})
+                                except Exception:
+                                    pass
+                                lanes_arr.append({ 'id': ln, 'state': lane_states.get(ln, 'r'), 'angle': lane_angles.get(ln, 0.0), 'shape': pts })
+                            tls_obj['lanes'] = lanes_arr
+                            # Per-side turn states (L,S,R,U)
+                            turns = {'N': {}, 'E': {}, 'S': {}, 'W': {}}
+                            def classify_turn(a_in, a_out):
+                                # normalize to [-180,180]
+                                d = (a_out - a_in + 180.0) % 360.0 - 180.0
+                                if abs(d) > 150:
+                                    return 'U'
+                                if -30 <= d <= 30:
+                                    return 'S'
+                                if d > 30:
+                                    return 'L'
+                                return 'R'
+                            for idx, link_group in enumerate(links):
+                                if idx >= len(state):
+                                    break
+                                if not link_group:
+                                    continue
+                                inLane = link_group[0][0]
+                                outLane = link_group[0][1]
+                                try:
+                                    in_shape = traci.lane.getShape(inLane)
+                                    out_shape = traci.lane.getShape(outLane)
+                                except Exception:
+                                    in_shape, out_shape = [], []
+                                if not in_shape or not out_shape:
+                                    continue
+                                try:
+                                    in_end = in_shape[-1]
+                                    out_start = out_shape[0]
+                                    a_in = degrees(atan2(in_end[1]-y_c, in_end[0]-x_c))
+                                    a_out = degrees(atan2(out_start[1]-y_c, out_start[0]-x_c))
+                                    side = side_bucket(in_end[0]-x_c, in_end[1]-y_c)
+                                    turn = classify_turn(a_in, a_out)
+                                    ch = state[idx].lower()
+                                    val = 'g' if ch == 'g' else ('y' if ch == 'y' else 'r')
+                                    prev = turns[side].get(turn)
+                                    turns[side][turn] = choose(prev, val)
+                                except Exception:
+                                    continue
+                            tls_obj['turns'] = turns
+                        except Exception:
+                            pass
                         tls_states.append(tls_obj)
                 except Exception:
                     pass
@@ -303,34 +420,150 @@ def main():
                         pass
                 vehicles.append(item)
 
-            # Traffic light states with approximate geometry
+            # Traffic light states with approximate geometry and per-side summary
             tls_states = []
             try:
                 for tls_id in traci.trafficlight.getIDList():
                     state = traci.trafficlight.getRedYellowGreenState(tls_id)
                     tls_obj = {'id': tls_id, 'state': state}
-                    if geo_ref is not None:
-                        try:
-                            # Approximate position by averaging controlled lanes' first point
-                            controlled_lanes = traci.trafficlight.getControlledLanes(tls_id)
-                            xs, ys, count = 0.0, 0.0, 0
-                            for ln in controlled_lanes:
+                    # Approximate TLS center from controlled lanes
+                    x_c = None; y_c = None
+                    try:
+                        controlled_lanes = traci.trafficlight.getControlledLanes(tls_id)
+                        xs, ys, count = 0.0, 0.0, 0
+                        for ln in controlled_lanes:
+                            try:
+                                shape = traci.lane.getShape(ln)
+                                if shape:
+                                    xs += float(shape[0][0])
+                                    ys += float(shape[0][1])
+                                    count += 1
+                            except Exception:
+                                continue
+                        if count > 0:
+                            x_c = xs / count
+                            y_c = ys / count
+                            try:
+                                tls_obj['cx'] = float(x_c); tls_obj['cy'] = float(y_c)
+                            except Exception:
+                                pass
+                            if geo_ref is not None:
                                 try:
-                                    shape = traci.lane.getShape(ln)
-                                    if shape:
-                                        xs += float(shape[0][0])
-                                        ys += float(shape[0][1])
-                                        count += 1
+                                    lon, lat = geo_ref.convertXY2LonLat(x_c, y_c)
+                                    tls_obj['lon'] = float(lon)
+                                    tls_obj['lat'] = float(lat)
                                 except Exception:
-                                    continue
-                            if count > 0:
-                                x = xs / count
-                                y = ys / count
-                                lon, lat = geo_ref.convertXY2LonLat(x, y)
-                                tls_obj['lon'] = float(lon)
-                                tls_obj['lat'] = float(lat)
-                        except Exception:
-                            pass
+                                    pass
+                    except Exception:
+                        pass
+                    # Per-side summary
+                    try:
+                        links = traci.trafficlight.getControlledLinks(tls_id)
+                        sides = {'N': 'r', 'E': 'r', 'S': 'r', 'W': 'r'}
+                        lane_states = {}
+                        lane_angles = {}
+                        def side_bucket(dx, dy):
+                            ang = degrees(atan2(dy, dx))
+                            if -45 <= ang < 45:
+                                return 'E'
+                            if 45 <= ang < 135:
+                                return 'N'
+                            if -135 <= ang < -45:
+                                return 'S'
+                            return 'W'
+                        def choose(prev, val):
+                            if prev is None:
+                                return val
+                            if prev == 'g' or val == 'g':
+                                return 'g'
+                            if prev == 'y' or val == 'y':
+                                return 'y'
+                            return 'r'
+                        for idx, link_group in enumerate(links):
+                            if idx >= len(state):
+                                break
+                            if not link_group:
+                                continue
+                            inLane = link_group[0][0]
+                            try:
+                                shape = traci.lane.getShape(inLane)
+                                if shape:
+                                    px, py = shape[-1][0], shape[-1][1]
+                                    if x_c is not None and y_c is not None:
+                                        dx, dy = px - x_c, py - y_c
+                                    else:
+                                        dx, dy = px, py
+                                    side = side_bucket(dx, dy)
+                                    ch = state[idx].lower()
+                                    val = 'g' if ch == 'g' else ('y' if ch == 'y' else 'r')
+                                    cur = sides.get(side, 'r')
+                                    if cur == 'r' or (cur == 'y' and val == 'g'):
+                                        sides[side] = val
+                                    lane_states[inLane] = choose(lane_states.get(inLane), val)
+                                    lane_angles[inLane] = float(degrees(atan2(dy, dx)))
+                            except Exception:
+                                continue
+                        tls_obj['sides'] = sides
+                        lanes_arr = []
+                        for ln in lane_states.keys():
+                            try:
+                                shp = traci.lane.getShape(ln)
+                            except Exception:
+                                shp = []
+                            pts = []
+                            try:
+                                if shp:
+                                    seg = shp[-min(10, len(shp)):]  # last points approaching center
+                                    for px, py in seg:
+                                        pts.append({'x': float(px), 'y': float(py)})
+                            except Exception:
+                                pass
+                            lanes_arr.append({ 'id': ln, 'state': lane_states.get(ln, 'r'), 'angle': lane_angles.get(ln, 0.0), 'shape': pts })
+                        tls_obj['lanes'] = lanes_arr
+                        # Per-side turn states (L,S,R,U)
+                        turns = {'N': {}, 'E': {}, 'S': {}, 'W': {}}
+                        def classify_turn(a_in, a_out):
+                            d = (a_out - a_in + 180.0) % 360.0 - 180.0
+                            if abs(d) > 150:
+                                return 'U'
+                            if -30 <= d <= 30:
+                                return 'S'
+                            if d > 30:
+                                return 'L'
+                            return 'R'
+                        for idx, link_group in enumerate(links):
+                            if idx >= len(state):
+                                break
+                            if not link_group:
+                                continue
+                            inLane = link_group[0][0]
+                            outLane = link_group[0][1]
+                            try:
+                                in_shape = traci.lane.getShape(inLane)
+                                out_shape = traci.lane.getShape(outLane)
+                            except Exception:
+                                in_shape, out_shape = [], []
+                            if not in_shape or not out_shape:
+                                continue
+                            try:
+                                in_end = in_shape[-1]
+                                out_start = out_shape[0]
+                                a_in = degrees(atan2(in_end[1]-y_c, in_end[0]-x_c))
+                                a_out = degrees(atan2(out_start[1]-y_c, out_start[0]-x_c))
+                                side = side_bucket(in_end[0]-x_c, in_end[1]-y_c)
+                                turn = classify_turn(a_in, a_out)
+                                ch = state[idx].lower()
+                                val = 'g' if ch == 'g' else ('y' if ch == 'y' else 'r')
+                                prev = turns[side].get(turn)
+                                if 'choose' in globals():
+                                    turns[side][turn] = choose(prev, val)
+                                else:
+                                    turns[side][turn] = val
+                            except Exception:
+                                continue
+                        tls_obj['turns'] = turns
+                    except Exception:
+                        pass
                     tls_states.append(tls_obj)
             except Exception:
                 pass

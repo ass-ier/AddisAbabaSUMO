@@ -221,6 +221,16 @@ const TrafficMap = () => {
     return batches;
   }, [edgeGeoms]);
 
+  // Fast lookup of lane geometries by lane id (from .net.xml parsed data)
+  const laneGeomsById = useMemo(() => {
+    const m = new Map();
+    const lanes = Array.isArray(sumoNetData.lanes) ? sumoNetData.lanes : [];
+    for (const l of lanes) {
+      if (l && typeof l.id === 'string' && Array.isArray(l.points)) m.set(l.id, l.points);
+    }
+    return m;
+  }, [sumoNetData.lanes]);
+
   // Internal connector lanes to fill junctions
   const internalBatches = useMemo(() => {
     const lanes = Array.isArray(sumoNetData.lanes) ? sumoNetData.lanes : [];
@@ -457,10 +467,10 @@ const TrafficMap = () => {
             setEdgeCongestion(agg);
           }
           if (payload.tls) {
-            // Keep TLS state by ID regardless of coordinates; we will place them using net.xml geometry
+            // Keep TLS state by ID regardless of coordinates; include per-side summary if provided
             next.tls = payload.tls
               .filter((t) => t && typeof t.id === 'string')
-              .map((t) => ({ id: t.id, state: t.state }));
+              .map((t) => ({ id: t.id, state: t.state, sides: t.sides }));
           }
           // Optional future: tls/intersections mapping
         }
@@ -541,6 +551,23 @@ const TrafficMap = () => {
         </div>
       </div>`;
     return L.divIcon({ className: 'tls-dynamic-icon', html, iconSize: [24, 20], iconAnchor: [12, 10] });
+  };
+
+  // Panel icon: square in the middle with colored sides for N,E,S,W
+  const createTlsPanelIcon = (sides) => {
+    const color = (c) => c === 'g' ? '#25A244' : (c === 'y' ? '#FFC107' : '#D7263D');
+    const N = color(sides?.N || 'r');
+    const E = color(sides?.E || 'r');
+    const S = color(sides?.S || 'r');
+    const W = color(sides?.W || 'r');
+    const html = `
+      <div style="width:22px;height:22px;position:relative;background:rgba(0,0,0,0.35);border-radius:4px;box-shadow:0 0 2px rgba(0,0,0,0.35)">
+        <div style="position:absolute;top:0;left:3px;right:3px;height:4px;background:${N};border-radius:2px"></div>
+        <div style="position:absolute;bottom:0;left:3px;right:3px;height:4px;background:${S};border-radius:2px"></div>
+        <div style="position:absolute;top:3px;bottom:3px;right:0;width:4px;background:${E};border-radius:2px"></div>
+        <div style="position:absolute;top:3px;bottom:3px;left:0;width:4px;background:${W};border-radius:2px"></div>
+      </div>`;
+    return L.divIcon({ className: 'tls-panel-icon', html, iconSize: [22, 22], iconAnchor: [11, 11] });
   };
 
   // Fallback emoji icon
@@ -707,16 +734,23 @@ const TrafficMap = () => {
 
             {/* TLS from .net.xml positions with live phase state from simulation */}
             {mapView === "traffic" && Array.isArray(sumoNetData.tls) && (() => {
-              const liveMap = new Map((Array.isArray(mapData.tls) ? mapData.tls : []).map((t) => [t.id, t.state]));
+              const liveMap = new Map((Array.isArray(mapData.tls) ? mapData.tls : []).map((t) => [t.id, t]));
               return sumoNetData.tls.map((t) => {
-                const st = liveMap.get(t.id);
-                const icon = st ? createTlsIconDynamic(st) : tlsEmojiIcon();
+                const live = liveMap.get(t.id) || {};
+                const st = live.state;
+                const sides = live.sides;
+                const icon = tlsEmojiIcon(); // popup will display detailed per-lane panel
                 return (
                   <Marker key={t.id} position={[t.lat, t.lng]} icon={icon}>
                     <Popup>
                       <div>
-                        <strong>TLS {t.id}</strong>
-                        {st ? <div>State: {st}</div> : null}
+                        <div style={{ fontWeight: 700 }}>TLS {t.id}</div>
+                        {/* Movement-aware arrows per side (L/S/R) when available; fallback to per-side arrows */}
+                        {live?.turns ? (
+                          <TlsTurnArrowsLayout turns={live.turns} />
+                        ) : (
+                          <TlsArrowsLayout sides={live?.sides} />
+                        )}
                       </div>
                     </Popup>
                   </Marker>
@@ -789,6 +823,140 @@ const TrafficMap = () => {
           </div>
         </div>
     </PageLayout>
+  );
+};
+
+// Render a cropped intersection schematic using actual lane geometry
+// Movement-aware arrow schematic (per-side L/S/R)
+const TlsTurnArrowsLayout = ({ turns = {} }) => {
+  const W = 260, H = 260; const cx = W/2, cy = H/2;
+  const color = (s) => s === 'g' ? '#25A244' : s === 'y' ? '#FFC107' : '#D7263D';
+  const drawArrow = (ctx) => {
+    const { x, y, dir, col } = ctx; const len = 52, bar = 8, tri = 14;
+    if (dir === 'down') {
+      return (
+        <g>
+          <rect x={x - bar/2} y={y} width={bar} height={len - tri} fill={col} rx={3} />
+          <polygon points={`${x},${y+len} ${x-10},${y+len-tri} ${x+10},${y+len-tri}`} fill={col} />
+        </g>
+      );
+    }
+    if (dir === 'up') {
+      return (
+        <g>
+          <rect x={x - bar/2} y={y - (len - tri)} width={bar} height={len - tri} fill={col} rx={3} />
+          <polygon points={`${x},${y-len} ${x-10},${y-len+tri} ${x+10},${y-len+tri}`} fill={col} />
+        </g>
+      );
+    }
+    if (dir === 'left') {
+      return (
+        <g>
+          <rect x={x - (len - tri)} y={y - bar/2} width={len - tri} height={bar} fill={col} rx={3} />
+          <polygon points={`${x-len},${y} ${x-len+tri},${y-10} ${x-len+tri},${y+10}`} fill={col} />
+        </g>
+      );
+    }
+    // right
+    return (
+      <g>
+        <rect x={x} y={y - bar/2} width={len - tri} height={bar} fill={col} rx={3} />
+        <polygon points={`${x+len},${y} ${x+len-tri},${y-10} ${x+len-tri},${y+10}`} fill={col} />
+      </g>
+    );
+  };
+  // positions
+  const gap = 24;
+  const data = [];
+  // North side (arrows go down). Place left/straight/right offset in X
+  if (turns?.N) {
+    if (turns.N.L) data.push({ x: cx - gap, y: cy - 70, dir: 'down', col: color(turns.N.L) });
+    if (turns.N.S) data.push({ x: cx, y: cy - 70, dir: 'down', col: color(turns.N.S) });
+    if (turns.N.R) data.push({ x: cx + gap, y: cy - 70, dir: 'down', col: color(turns.N.R) });
+  }
+  // South side (arrows go up)
+  if (turns?.S) {
+    if (turns.S.L) data.push({ x: cx + gap, y: cy + 70, dir: 'up', col: color(turns.S.L) });
+    if (turns.S.S) data.push({ x: cx, y: cy + 70, dir: 'up', col: color(turns.S.S) });
+    if (turns.S.R) data.push({ x: cx - gap, y: cy + 70, dir: 'up', col: color(turns.S.R) });
+  }
+  // East side (arrows go left). Offset in Y (top=left-turn when facing west)
+  if (turns?.E) {
+    if (turns.E.L) data.push({ x: cx + 70, y: cy - gap, dir: 'left', col: color(turns.E.L) });
+    if (turns.E.S) data.push({ x: cx + 70, y: cy, dir: 'left', col: color(turns.E.S) });
+    if (turns.E.R) data.push({ x: cx + 70, y: cy + gap, dir: 'left', col: color(turns.E.R) });
+  }
+  // West side (arrows go right). Offset in Y
+  if (turns?.W) {
+    if (turns.W.L) data.push({ x: cx - 70, y: cy + gap, dir: 'right', col: color(turns.W.L) });
+    if (turns.W.S) data.push({ x: cx - 70, y: cy, dir: 'right', col: color(turns.W.S) });
+    if (turns.W.R) data.push({ x: cx - 70, y: cy - gap, dir: 'right', col: color(turns.W.R) });
+  }
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', marginTop: 6 }}>
+      <rect x={0} y={0} width={W} height={H} fill="white" stroke="#e0e0e0" />
+      {data.map((ctx, i) => <g key={i}>{drawArrow(ctx)}</g>)}
+      {/* center box */}
+      <rect x={cx - 12} y={cy - 12} width={24} height={24} fill="#f5f5f5" stroke="#bdbdbd" rx={3} />
+    </svg>
+  );
+};
+
+// Fallback: Arrow-based schematic per side only
+const TlsArrowsLayout = ({ sides = {} }) => {
+  const W = 220, H = 220;
+  const cx = W / 2, cy = H / 2;
+  const color = (s) => s === 'g' ? '#25A244' : s === 'y' ? '#FFC107' : '#D7263D';
+  const N = color(sides?.N || 'r');
+  const E = color(sides?.E || 'r');
+  const S = color(sides?.S || 'r');
+  const Wc = color(sides?.W || 'r');
+  const Arrow = ({ dir }) => {
+    // Define basic arrow dimensions
+    const len = 60, bar = 8, tri = 14;
+    if (dir === 'N') {
+      return (
+        <g>
+          <rect x={cx - bar/2} y={cy - len} width={bar} height={len - tri} fill={N} rx={3} />
+          <polygon points={`${cx},${cy - len} ${cx - 10},${cy - len + tri} ${cx + 10},${cy - len + tri}`} fill={N} />
+        </g>
+      );
+    }
+    if (dir === 'S') {
+      return (
+        <g>
+          <rect x={cx - bar/2} y={cy + tri} width={bar} height={len - tri} fill={S} rx={3} />
+          <polygon points={`${cx},${cy + len} ${cx - 10},${cy + len - tri} ${cx + 10},${cy + len - tri}`} fill={S} />
+        </g>
+      );
+    }
+    if (dir === 'E') {
+      return (
+        <g>
+          <rect x={cx + tri} y={cy - bar/2} width={len - tri} height={bar} fill={E} rx={3} />
+          <polygon points={`${cx + len},${cy} ${cx + len - tri},${cy - 10} ${cx + len - tri},${cy + 10}`} fill={E} />
+        </g>
+      );
+    }
+    // W
+    return (
+      <g>
+        <rect x={cx - len} y={cy - bar/2} width={len - tri} height={bar} fill={Wc} rx={3} />
+        <polygon points={`${cx - len},${cy} ${cx - len + tri},${cy - 10} ${cx - len + tri},${cy + 10}`} fill={Wc} />
+      </g>
+    );
+  };
+  return (
+    <svg width={220} height={220} viewBox={`0 0 ${220} ${220}`} style={{ display: 'block', marginTop: 6 }}>
+      <rect x={0} y={0} width={220} height={220} fill="white" stroke="#e0e0e0" />
+      {/* Draw arrows toward center */}
+      <Arrow dir="N" />
+      <Arrow dir="S" />
+      <Arrow dir="E" />
+      <Arrow dir="W" />
+      {/* center box */}
+      <rect x={cx - 10} y={cy - 10} width={20} height={20} fill="#f5f5f5" stroke="#bdbdbd" rx={3} />
+    </svg>
   );
 };
 
