@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   MapContainer,
-  TileLayer,
   Marker,
   Popup,
   Polyline,
@@ -125,68 +124,7 @@ const createVehicleIcon = (vehicle) => {
   });
 };
 
-// Intersection status icon (kept small, but modern look)
-const createIntersectionIcon = (status) => {
-  const colors = {
-    normal: "#4CAF50",
-    congested: "#FF9800",
-    critical: "#F44336",
-    emergency: "#9C27B0",
-    maintenance: "#607D8B",
-  };
-  return L.divIcon({
-    className: "custom-traffic-icon",
-    html: `<div class="intersection-dot" style="background:${
-      colors[status] || colors.normal
-    }"></div>`,
-    iconSize: [16, 16],
-    iconAnchor: [8, 8],
-  });
-};
 
-// Component to update map view based on data
-const MapController = ({ intersections, lanes, geoBounds }) => {
-  const map = useMap();
-
-  useEffect(() => {
-    // Prefer SUMO geo bounds when available
-    if (
-      geoBounds &&
-      typeof geoBounds.minLat === "number" &&
-      typeof geoBounds.minLon === "number" &&
-      typeof geoBounds.maxLat === "number" &&
-      typeof geoBounds.maxLon === "number"
-    ) {
-      const bounds = L.latLngBounds(
-        [geoBounds.minLat, geoBounds.minLon],
-        [geoBounds.maxLat, geoBounds.maxLon]
-      );
-      map.fitBounds(bounds, { padding: [20, 20] });
-      return;
-    }
-
-    // Fallback: fit to lanes
-    if (lanes && lanes.length > 0) {
-      const allPoints = lanes.flatMap((l) => l.points);
-      const bounds = L.latLngBounds(allPoints);
-      map.fitBounds(bounds, { padding: [20, 20] });
-      return;
-    }
-
-    // Fallback: fit to intersections demo data
-    if (intersections.length > 0) {
-      const bounds = L.latLngBounds(
-        intersections.map((intersection) => [
-          intersection.lat,
-          intersection.lng,
-        ])
-      );
-      map.fitBounds(bounds, { padding: [20, 20] });
-    }
-  }, [intersections, lanes, geoBounds, map]);
-
-  return null;
-};
 
 // Fit helper for SUMO bounds (guarded to avoid repeated fits/loops)
 const FitBoundsController = ({ bounds }) => {
@@ -219,20 +157,11 @@ const TrafficMap = () => {
     tls: [],
   });
   const [loading, setLoading] = useState(true);
-  const [selectedIntersection, setSelectedIntersection] = useState(null);
   const [mapView, setMapView] = useState("traffic"); // traffic, emergency, maintenance
-  const [dataMode, setDataMode] = useState("simulation"); // simulation | real
-  const [areaBbox, setAreaBbox] = useState({
-    minLat: 8.85,
-    minLon: 38.6,
-    maxLat: 9.15,
-    maxLon: 38.9,
-  });
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(5000); // 5 seconds
   const socketRef = useRef(null);
   const { user } = useAuth();
-  const [showDensity, setShowDensity] = useState(true);
 
   // SUMO Net (client-side .net.xml) view state
   const [sumoNetMode, setSumoNetMode] = useState(true);
@@ -264,7 +193,7 @@ const TrafficMap = () => {
     return L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
   }, [sumoNetData]);
 
-  // Build merged "edge" geometries from lanes (prefer live sim lanes for edge-id alignment)
+  // Build edge geometries from backend-provided lon/lat lanes for tile rendering
   const edgeGeoms = useMemo(() => {
     const sourceLanes = Array.isArray(simNetLanes) && simNetLanes.length
       ? simNetLanes
@@ -424,25 +353,33 @@ const TrafficMap = () => {
     ],
   };
 
+  // Define fetchMapData before any effects use it
+  const fetchMapData = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      // Keep existing live data if any; only use mock as fallback when nothing has arrived yet
+      setMapData((prev) => ({
+        ...mockData,
+        lanes: prev.lanes?.length ? prev.lanes : [],
+        geoBounds: prev.geoBounds || null,
+        vehicles: prev.vehicles?.length ? prev.vehicles : mockData.vehicles,
+        tls: Array.isArray(prev.tls) ? prev.tls : [],
+      }));
+    } catch (error) {
+      console.error("Error fetching map data:", error);
+      window.dispatchEvent(
+        new CustomEvent("notify", {
+          detail: { type: "error", message: "Failed to refresh map" },
+        })
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     // initial fetch
     fetchMapData();
-    // load map settings
-    api
-      .getMapSettings()
-      .then((s) => {
-        if (s?.mode) setDataMode(s.mode);
-        if (
-          s?.bbox &&
-          typeof s.bbox.minLat === "number" &&
-          typeof s.bbox.minLon === "number" &&
-          typeof s.bbox.maxLat === "number" &&
-          typeof s.bbox.maxLon === "number"
-        ) {
-          setAreaBbox(s.bbox);
-        }
-      })
-      .catch(() => {});
 
     // socket connection
     socketRef.current = io("http://localhost:5001");
@@ -520,16 +457,10 @@ const TrafficMap = () => {
             setEdgeCongestion(agg);
           }
           if (payload.tls) {
+            // Keep TLS state by ID regardless of coordinates; we will place them using net.xml geometry
             next.tls = payload.tls
-              .filter(
-                (t) => typeof t.lat === "number" && typeof t.lon === "number"
-              )
-              .map((t) => ({
-                id: t.id,
-                lat: t.lat,
-                lng: t.lon,
-                state: t.state,
-              }));
+              .filter((t) => t && typeof t.id === 'string')
+              .map((t) => ({ id: t.id, state: t.state }));
           }
           // Optional future: tls/intersections mapping
         }
@@ -540,37 +471,15 @@ const TrafficMap = () => {
     return () => {
       if (socketRef.current) socketRef.current.disconnect();
     };
-  }, []);
+  }, [fetchMapData]);
 
   useEffect(() => {
     if (autoRefresh) {
       const interval = setInterval(fetchMapData, refreshInterval);
       return () => clearInterval(interval);
     }
-  }, [autoRefresh, refreshInterval]);
+  }, [autoRefresh, refreshInterval, fetchMapData]);
 
-  const fetchMapData = async () => {
-    try {
-      setLoading(true);
-      // Keep existing live data if any; only use mock as fallback when nothing has arrived yet
-      setMapData((prev) => ({
-        ...mockData,
-        lanes: prev.lanes?.length ? prev.lanes : [],
-        geoBounds: prev.geoBounds || null,
-        vehicles: prev.vehicles?.length ? prev.vehicles : mockData.vehicles,
-        tls: Array.isArray(prev.tls) ? prev.tls : [],
-      }));
-    } catch (error) {
-      console.error("Error fetching map data:", error);
-      window.dispatchEvent(
-        new CustomEvent("notify", {
-          detail: { type: "error", message: "Failed to refresh map" },
-        })
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Load SUMO .net.xml from public folder and render with CRS.Simple (Netedit-like)
   const loadSumoNetLocal = async (path = "/Sumoconfigs/AddisAbaba.net.xml") => {
@@ -597,136 +506,49 @@ const TrafficMap = () => {
   };
 
   // Auto-load SUMO net on mount so Netedit-style map shows by default if file is present
+  const loadSumoNetLocalCb = React.useCallback(loadSumoNetLocal, []);
   useEffect(() => {
-    loadSumoNetLocal();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    loadSumoNetLocalCb();
+  }, [loadSumoNetLocalCb]);
 
-  const handleIntersectionClick = (intersection) => {
-    setSelectedIntersection(intersection);
-  };
-
-  const getCongestionColor = (level) => {
-    switch (level) {
-      case "high":
-        return "#F44336";
-      case "medium":
-        return "#FF9800";
-      case "low":
-        return "#4CAF50";
-      default:
-        return "#9E9E9E";
+  // Parse TLS state string into counts and percentages
+  const summarizeTlsState = (stateStr) => {
+    const s = String(stateStr || '').toLowerCase();
+    let red = 0, yellow = 0, green = 0;
+    for (const ch of s) {
+      if (ch === 'r') red += 1;
+      else if (ch === 'y') yellow += 1;
+      else if (ch === 'g') green += 1;
+      else if (ch === 'o') red += 1; // treat off as stop
     }
+    const total = Math.max(1, red + yellow + green);
+    return { red, yellow, green, total, redPct: red/total, yellowPct: yellow/total, greenPct: green/total };
   };
 
-  const getTrafficFlowColor = (intensity) => {
-    switch (intensity) {
-      case "high":
-        return "#F44336";
-      case "medium":
-        return "#FF9800";
-      case "low":
-        return "#4CAF50";
-      default:
-        return "#9E9E9E";
-    }
+  // Dynamic TLS icon showing current phase distribution and state text
+  const createTlsIconDynamic = (stateStr) => {
+    const { redPct, yellowPct, greenPct } = summarizeTlsState(stateStr);
+    const bar = (color, pct) => `<div style="height:4px;background:${color};width:${Math.max(8, Math.round(pct*16))}px;border-radius:2px"></div>`;
+    const html = `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:2px 3px;background:rgba(0,0,0,0.55);border-radius:4px;color:#fff">
+        <div style="display:flex;gap:2px;align-items:center;justify-content:center">
+          ${bar('#D7263D', redPct)}
+          ${bar('#FFC107', yellowPct)}
+          ${bar('#25A244', greenPct)}
+        </div>
+        <div style="font:700 9px/10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;letter-spacing:0.5px;opacity:0.95;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis">
+          ${String(stateStr || '').toUpperCase()}
+        </div>
+      </div>`;
+    return L.divIcon({ className: 'tls-dynamic-icon', html, iconSize: [24, 20], iconAnchor: [12, 10] });
   };
 
-  // Simple emoji-based traffic light icon
-  const tlsEmojiIcon = () =>
-    L.divIcon({
-      className: "custom-traffic-icon",
-      html: '<div style="font-size:18px; line-height:18px">🚦</div>',
-      iconSize: [18, 18],
-      iconAnchor: [9, 9],
-    });
+  // Fallback emoji icon
+  const tlsEmojiIcon = () => L.divIcon({ className: 'custom-traffic-icon', html: '<div style="font-size:18px; line-height:18px">🚦</div>', iconSize: [18, 18], iconAnchor: [9, 9] });
 
-  // Lightweight clustering by rounding coordinates into grid cells
-  const clusterVehicles = (vehicles, gridSizeDeg = 0.0015) => {
-    if (!Array.isArray(vehicles) || vehicles.length < 200) return vehicles;
-    const cellKey = (lat, lon) =>
-      `${Math.round(lat / gridSizeDeg)}:${Math.round(lon / gridSizeDeg)}`;
-    const cells = new Map();
-    for (const v of vehicles) {
-      const key = cellKey(v.lat, v.lng);
-      const cell = cells.get(key) || { lat: 0, lng: 0, count: 0 };
-      cell.lat += v.lat;
-      cell.lng += v.lng;
-      cell.count += 1;
-      cells.set(key, cell);
-    }
-    return Array.from(cells.entries()).map(([key, c], idx) => ({
-      id: `cluster_${idx}`,
-      lat: c.lat / c.count,
-      lng: c.lng / c.count,
-      type: "cluster",
-      count: c.count,
-    }));
-  };
 
-  const totals = {
-    vehicles: mapData.vehicles.length,
-    tls: Array.isArray(mapData.tls) ? mapData.tls.length : 0,
-  };
-  const tlsCounts = Array.isArray(mapData.tls)
-    ? mapData.tls.reduce(
-        (acc, t) => {
-          const s = String(t.state || "").toLowerCase();
-          if (s.includes("r")) acc.red += 1;
-          if (s.includes("y")) acc.yellow += 1;
-          if (s.includes("g")) acc.green += 1;
-          return acc;
-        },
-        { red: 0, yellow: 0, green: 0 }
-      )
-    : { red: 0, yellow: 0, green: 0 };
 
-  const clusterColor = (count) => {
-    if (count >= 200) return "#b71c1c"; // very high
-    if (count >= 100) return "#e53935";
-    if (count >= 50) return "#fb8c00";
-    if (count >= 20) return "#fdd835";
-    return "#43a047";
-  };
 
-  const canManualOverride =
-    user?.role === "admin" || user?.role === "super_admin";
-  const manualOverride = async (intersection) => {
-    if (!canManualOverride) return;
-    if (!window.confirm(`Force green at ${intersection.name}?`)) return;
-    try {
-      await api.overrideIntersection(intersection.id, {
-        desiredState: "green",
-        durationSec: 15,
-      });
-      window.dispatchEvent(
-        new CustomEvent("notify", {
-          detail: {
-            type: "success",
-            message: `Override sent for ${intersection.name}`,
-          },
-        })
-      );
-    } catch (e) {
-      window.dispatchEvent(
-        new CustomEvent("notify", {
-          detail: {
-            type: "error",
-            message: `Failed to override ${intersection.name}`,
-          },
-        })
-      );
-    }
-  };
-
-  const filteredIntersections = mapData.intersections.filter((intersection) => {
-    if (mapView === "emergency") return intersection.status === "emergency";
-    if (mapView === "maintenance") return intersection.status === "maintenance";
-    return true;
-  });
-
-  const addisCenter = [9.03, 38.74];
-  const addisZoom = 12;
 
   return (
     <PageLayout
@@ -883,17 +705,24 @@ const TrafficMap = () => {
               <Polyline positions={congestedClasses.red} color="#D7263D" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
             )}
 
-            {/* Traffic Lights from .net.xml (junctions) */}
-            {mapView === "traffic" && Array.isArray(sumoNetData.tls) &&
-              sumoNetData.tls.map((t) => (
-                <Marker key={t.id} position={[t.lat, t.lng]} icon={tlsEmojiIcon()}>
-                  <Popup>
-                    <div>
-                      <strong>TLS {t.id}</strong>
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
+            {/* TLS from .net.xml positions with live phase state from simulation */}
+            {mapView === "traffic" && Array.isArray(sumoNetData.tls) && (() => {
+              const liveMap = new Map((Array.isArray(mapData.tls) ? mapData.tls : []).map((t) => [t.id, t.state]));
+              return sumoNetData.tls.map((t) => {
+                const st = liveMap.get(t.id);
+                const icon = st ? createTlsIconDynamic(st) : tlsEmojiIcon();
+                return (
+                  <Marker key={t.id} position={[t.lat, t.lng]} icon={icon}>
+                    <Popup>
+                      <div>
+                        <strong>TLS {t.id}</strong>
+                        {st ? <div>State: {st}</div> : null}
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              });
+            })()}
 
             {/* Live vehicles from SUMO on CRS.Simple (use net coords y,x) */}
             {Array.isArray(mapData.vehicles) &&

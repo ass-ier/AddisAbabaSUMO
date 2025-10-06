@@ -302,20 +302,10 @@ const EnhancedSUMOIntegration = () => {
 
   const socketRef = useRef(null);
 
-  // SUMO config list/state
-  const [sumoConfigs, setSumoConfigs] = useState({ files: [], selected: "" });
-  const loadSumoConfigs = async () => {
-    try {
-      const res = await axios.get("/api/sumo/configs", { withCredentials: true });
-      setSumoConfigs({ files: res.data?.files || [], selected: res.data?.selected || "" });
-    } catch (e) {
-      // ignore
-    }
-  };
+  // SUMO config setter (no local state needed)
   const setSumoConfig = async (name) => {
     try {
       await axios.put("/api/sumo/config", { name }, { withCredentials: true });
-      setSumoConfigs((prev) => ({ ...prev, selected: name }));
       addLog(`SUMO config set to ${name}`, "success");
     } catch (e) {
       addLog(`Failed to set SUMO config: ${e.message}`, "error");
@@ -346,7 +336,6 @@ const EnhancedSUMOIntegration = () => {
 
     // Fetch initial status
     fetchSimulationStatus();
-    loadSumoConfigs();
 
     return () => {
       if (socketRef.current) {

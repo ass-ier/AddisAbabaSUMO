@@ -1064,14 +1064,22 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
                     };
                   } else if (payload.type === "viz") {
                     if (Array.isArray(payload.vehicles)) {
-                      payload.vehicles = payload.vehicles.filter((v) =>
-                        within(v.lat, v.lon)
-                      );
+                      // Only apply bbox if GPS is present; keep items with only XY
+                      payload.vehicles = payload.vehicles.filter((v) => {
+                        if (typeof v.lat === 'number' && typeof v.lon === 'number') {
+                          return within(v.lat, v.lon);
+                        }
+                        return true; // keep when only XY available
+                      });
                     }
                     if (Array.isArray(payload.tls)) {
-                      payload.tls = payload.tls.filter((t) =>
-                        within(t.lat, t.lon)
-                      );
+                      // Only apply bbox if GPS is present; always keep TLS without lat/lon so frontend can join by ID
+                      payload.tls = payload.tls.filter((t) => {
+                        if (typeof t.lat === 'number' && typeof t.lon === 'number') {
+                          return within(t.lat, t.lon);
+                        }
+                        return true;
+                      });
                     }
                   }
                 }
