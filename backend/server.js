@@ -23,9 +23,15 @@ const PORT = process.env.PORT || 5001;
 
 // Paths and helpers for SUMO configs located in frontend/public/Sumoconfigs
 const ROOT_DIR = path.join(__dirname, "..");
-const DEFAULT_SUMO_CONFIG_DIR = path.join(ROOT_DIR, "frontend", "public", "Sumoconfigs");
+const DEFAULT_SUMO_CONFIG_DIR = path.join(
+  ROOT_DIR,
+  "frontend",
+  "public",
+  "Sumoconfigs"
+);
 function resolveSumoConfigPath(nameOrPath) {
-  if (!nameOrPath) return path.join(DEFAULT_SUMO_CONFIG_DIR, "AddisAbabaSimple.sumocfg");
+  if (!nameOrPath)
+    return path.join(DEFAULT_SUMO_CONFIG_DIR, "AddisAbabaSimple.sumocfg");
   // If absolute or contains drive letter on Windows, return as-is
   if (path.isAbsolute(nameOrPath)) return nameOrPath;
   return path.join(DEFAULT_SUMO_CONFIG_DIR, nameOrPath);
@@ -71,7 +77,7 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   role: {
     type: String,
-    enum: ["super_admin", "admin", "operator", "analyst"],
+    enum: ["super_admin", "operator", "analyst"],
     required: true,
   },
   region: { type: String, default: "" },
@@ -485,7 +491,7 @@ app.get(
 app.get(
   "/api/settings",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
       let s = await Settings.findOne();
@@ -714,7 +720,7 @@ app.get("/api/traffic-data/export.csv", authenticateToken, async (req, res) => {
 app.get(
   "/api/reports/kpis",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
       const latest = await TrafficData.find()
@@ -742,7 +748,7 @@ app.get(
 app.get(
   "/api/reports/trends",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
       const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -786,32 +792,47 @@ app.get("/api/sumo/configs", authenticateToken, async (req, res) => {
     } catch (_) {}
     res.json({ directory: dir, files, selected });
   } catch (e) {
-    res.status(500).json({ message: "Failed to list SUMO configs", error: e.message });
+    res
+      .status(500)
+      .json({ message: "Failed to list SUMO configs", error: e.message });
   }
 });
 
-app.put("/api/sumo/config", authenticateToken, requireAnyRole(["super_admin", "admin"]), async (req, res) => {
-  try {
-    const { name } = req.body || {};
-    if (!name || typeof name !== "string" || !name.endsWith(".sumocfg")) {
-      return res.status(400).json({ message: "Invalid config name" });
+app.put(
+  "/api/sumo/config",
+  authenticateToken,
+  requireAnyRole(["super_admin"]),
+  async (req, res) => {
+    try {
+      const { name } = req.body || {};
+      if (!name || typeof name !== "string" || !name.endsWith(".sumocfg")) {
+        return res.status(400).json({ message: "Invalid config name" });
+      }
+      const fs = require("fs");
+      const fullPath = path.join(DEFAULT_SUMO_CONFIG_DIR, name);
+      if (!fs.existsSync(fullPath)) {
+        return res.status(404).json({ message: "Config not found" });
+      }
+      const s = await Settings.findOneAndUpdate(
+        {},
+        {
+          $set: {
+            "sumo.selectedConfig": name,
+            "sumo.configDir": DEFAULT_SUMO_CONFIG_DIR,
+            updatedAt: new Date(),
+          },
+        },
+        { new: true, upsert: true }
+      );
+      await recordAudit(req, "set_sumo_config", name);
+      res.json({ ok: true, selected: s?.sumo?.selectedConfig || name });
+    } catch (e) {
+      res
+        .status(500)
+        .json({ message: "Failed to set SUMO config", error: e.message });
     }
-    const fs = require("fs");
-    const fullPath = path.join(DEFAULT_SUMO_CONFIG_DIR, name);
-    if (!fs.existsSync(fullPath)) {
-      return res.status(404).json({ message: "Config not found" });
-    }
-    const s = await Settings.findOneAndUpdate(
-      {},
-      { $set: { "sumo.selectedConfig": name, "sumo.configDir": DEFAULT_SUMO_CONFIG_DIR, updatedAt: new Date() } },
-      { new: true, upsert: true }
-    );
-    await recordAudit(req, "set_sumo_config", name);
-    res.json({ ok: true, selected: s?.sumo?.selectedConfig || name });
-  } catch (e) {
-    res.status(500).json({ message: "Failed to set SUMO config", error: e.message });
   }
-});
+);
 
 // SUMO integration endpoints
 app.get("/api/sumo/status", authenticateToken, async (req, res) => {
@@ -854,7 +875,9 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           selectedConfigName = s?.sumo?.selectedConfig || null;
         } catch (_) {}
         const envCfg = process.env.SUMO_CONFIG_PATH || "";
-        const cfgPathEffective = resolveSumoConfigPath(selectedConfigName || envCfg);
+        const cfgPathEffective = resolveSumoConfigPath(
+          selectedConfigName || envCfg
+        );
 
         status.isRunning = true;
         status.startTime = new Date();
@@ -877,7 +900,11 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             candidates.push("python", "python3");
             for (const cmd of candidates) {
               if (!cmd) continue;
-              if (cmd.includes(":") || cmd.includes("/") || cmd.includes("\\")) {
+              if (
+                cmd.includes(":") ||
+                cmd.includes("/") ||
+                cmd.includes("\\")
+              ) {
                 if (fs.existsSync(cmd)) return cmd;
                 continue;
               }
@@ -890,9 +917,9 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           const bridgePath = require("path").join(__dirname, "sumo_bridge.py");
           const env = { ...process.env };
           // Ensure Python writes UTF-8 to stdout/stderr to avoid Windows cp1252 issues
-          env.PYTHONIOENCODING = env.PYTHONIOENCODING || 'utf-8';
+          env.PYTHONIOENCODING = env.PYTHONIOENCODING || "utf-8";
           if (process.env.SUMO_HOME) {
-            const pathMod = require('path');
+            const pathMod = require("path");
             env.PYTHONPATH = [
               env.PYTHONPATH || "",
               pathMod.join(process.env.SUMO_HOME, "tools"),
@@ -900,13 +927,15 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
               .filter(Boolean)
               .join(pathMod.delimiter);
             // Ensure SUMO bin is on PATH so "sumo" resolves if used
-            const sumoBin = pathMod.join(process.env.SUMO_HOME, 'bin');
-            env.PATH = [sumoBin, env.PATH || process.env.PATH || ""].filter(Boolean).join(pathMod.delimiter);
+            const sumoBin = pathMod.join(process.env.SUMO_HOME, "bin");
+            env.PATH = [sumoBin, env.PATH || process.env.PATH || ""]
+              .filter(Boolean)
+              .join(pathMod.delimiter);
           }
 
           // Decide whether to launch with GUI
           let startWithGuiFlag = false;
-          if (typeof parameters.startWithGui === 'boolean') {
+          if (typeof parameters.startWithGui === "boolean") {
             startWithGuiFlag = parameters.startWithGui;
           } else {
             try {
@@ -916,42 +945,79 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           }
 
           function fileExists(p) {
-            try { return !!p && require('fs').existsSync(p); } catch { return false; }
+            try {
+              return !!p && require("fs").existsSync(p);
+            } catch {
+              return false;
+            }
           }
           function resolveSumoBinary(sel, wantGui) {
-            const fs = require('fs');
-            const path = require('path');
-            const isAbs = sel && (sel.includes(':') || sel.includes('/') || sel.includes('\\'));
+            const fs = require("fs");
+            const path = require("path");
+            const isAbs =
+              sel &&
+              (sel.includes(":") || sel.includes("/") || sel.includes("\\"));
             if (isAbs && fileExists(sel)) return sel;
             // Try SUMO_HOME/bin
             if (process.env.SUMO_HOME) {
-              const bin = path.join(process.env.SUMO_HOME, 'bin',
-                process.platform === 'win32' ? (wantGui ? 'sumo-gui.exe' : 'sumo.exe') : (wantGui ? 'sumo-gui' : 'sumo')
+              const bin = path.join(
+                process.env.SUMO_HOME,
+                "bin",
+                process.platform === "win32"
+                  ? wantGui
+                    ? "sumo-gui.exe"
+                    : "sumo.exe"
+                  : wantGui
+                  ? "sumo-gui"
+                  : "sumo"
               );
               if (fileExists(bin)) return bin;
             }
             // Fallback to name on PATH
-            return wantGui ? (process.platform === 'win32' ? 'sumo-gui.exe' : 'sumo-gui') : (process.platform === 'win32' ? 'sumo.exe' : 'sumo');
+            return wantGui
+              ? process.platform === "win32"
+                ? "sumo-gui.exe"
+                : "sumo-gui"
+              : process.platform === "win32"
+              ? "sumo.exe"
+              : "sumo";
           }
 
           const selectedBinary = resolveSumoBinary(
-            startWithGuiFlag ? process.env.SUMO_BINARY_GUI_PATH : process.env.SUMO_BINARY_PATH,
+            startWithGuiFlag
+              ? process.env.SUMO_BINARY_GUI_PATH
+              : process.env.SUMO_BINARY_PATH,
             !!startWithGuiFlag
           );
 
-          const fsCheck = require('fs');
+          const fsCheck = require("fs");
           if (!fsCheck.existsSync(cfgPathEffective)) {
-            io.emit("simulationLog", { level: "error", message: `SUMO config not found: ${cfgPathEffective}`, ts: Date.now() });
+            io.emit("simulationLog", {
+              level: "error",
+              message: `SUMO config not found: ${cfgPathEffective}`,
+              ts: Date.now(),
+            });
             status.isRunning = false;
             status.lastUpdated = new Date();
             await status.save();
             io.emit("simulationStatus", status);
             return res.status(400).json({ message: "SUMO config not found" });
           }
-          if (!(selectedBinary && (selectedBinary.includes(':') || selectedBinary.includes('/') || selectedBinary.includes('\\')))) {
+          if (
+            !(
+              selectedBinary &&
+              (selectedBinary.includes(":") ||
+                selectedBinary.includes("/") ||
+                selectedBinary.includes("\\"))
+            )
+          ) {
             // If using name on PATH, that's fine. Otherwise verify absolute path exists (handled above in resolve)
           } else if (!fsCheck.existsSync(selectedBinary)) {
-            io.emit("simulationLog", { level: "error", message: `SUMO binary not found: ${selectedBinary}`, ts: Date.now() });
+            io.emit("simulationLog", {
+              level: "error",
+              message: `SUMO binary not found: ${selectedBinary}`,
+              ts: Date.now(),
+            });
             status.isRunning = false;
             status.lastUpdated = new Date();
             await status.save();
@@ -972,25 +1038,43 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           ];
 
           // Optional RL control
-          const wantRL = parameters && (parameters.useRL === true || typeof parameters.rlModelPath === 'string');
+          const wantRL =
+            parameters &&
+            (parameters.useRL === true ||
+              typeof parameters.rlModelPath === "string");
           if (wantRL) {
-            const pathMod = require('path');
-            const fs = require('fs');
-            let rlModelPath = parameters.rlModelPath || '';
+            const pathMod = require("path");
+            const fs = require("fs");
+            let rlModelPath = parameters.rlModelPath || "";
             if (!rlModelPath) {
               // Try a default model location under frontend/public/Sumoconfigs/logs/best_model.zip
-              const defaultModel = pathMod.join(ROOT_DIR, 'frontend', 'public', 'Sumoconfigs', 'logs', 'best_model.zip');
+              const defaultModel = pathMod.join(
+                ROOT_DIR,
+                "frontend",
+                "public",
+                "Sumoconfigs",
+                "logs",
+                "best_model.zip"
+              );
               if (fs.existsSync(defaultModel)) rlModelPath = defaultModel;
             } else if (!pathMod.isAbsolute(rlModelPath)) {
               rlModelPath = pathMod.join(ROOT_DIR, rlModelPath);
             }
             if (rlModelPath && fs.existsSync(rlModelPath)) {
-              args.push('--rl-model', rlModelPath);
-              args.push('--rl-delta', String(parameters.rlDelta || 15));
-              if (startWithGuiFlag) args.push('--rl-use-gui');
-              io.emit("simulationLog", { level: 'info', message: `RL control enabled with model ${rlModelPath}`, ts: Date.now() });
+              args.push("--rl-model", rlModelPath);
+              args.push("--rl-delta", String(parameters.rlDelta || 15));
+              if (startWithGuiFlag) args.push("--rl-use-gui");
+              io.emit("simulationLog", {
+                level: "info",
+                message: `RL control enabled with model ${rlModelPath}`,
+                ts: Date.now(),
+              });
             } else {
-              io.emit("simulationLog", { level: 'warn', message: `RL model not found; running SUMO default logic`, ts: Date.now() });
+              io.emit("simulationLog", {
+                level: "warn",
+                message: `RL model not found; running SUMO default logic`,
+                ts: Date.now(),
+              });
             }
           }
 
@@ -1014,7 +1098,11 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           sumoBridgeProcess.on("error", async (err) => {
             const msg = err?.message || String(err);
             console.error("[SUMO BRIDGE] spawn error:", msg);
-            io.emit("simulationLog", { level: "error", message: `Bridge spawn error: ${msg}` , ts: Date.now() });
+            io.emit("simulationLog", {
+              level: "error",
+              message: `Bridge spawn error: ${msg}`,
+              ts: Date.now(),
+            });
             try {
               status.isRunning = false;
               status.endTime = new Date();
@@ -1066,7 +1154,10 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
                     if (Array.isArray(payload.vehicles)) {
                       // Only apply bbox if GPS is present; keep items with only XY
                       payload.vehicles = payload.vehicles.filter((v) => {
-                        if (typeof v.lat === 'number' && typeof v.lon === 'number') {
+                        if (
+                          typeof v.lat === "number" &&
+                          typeof v.lon === "number"
+                        ) {
                           return within(v.lat, v.lon);
                         }
                         return true; // keep when only XY available
@@ -1075,7 +1166,10 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
                     if (Array.isArray(payload.tls)) {
                       // Only apply bbox if GPS is present; always keep TLS without lat/lon so frontend can join by ID
                       payload.tls = payload.tls.filter((t) => {
-                        if (typeof t.lat === 'number' && typeof t.lon === 'number') {
+                        if (
+                          typeof t.lat === "number" &&
+                          typeof t.lon === "number"
+                        ) {
                           return within(t.lat, t.lon);
                         }
                         return true;
@@ -1085,7 +1179,11 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
                 }
                 // Forward log messages from bridge
                 if (payload.type === "log") {
-                  io.emit("simulationLog", { level: payload.level || 'info', message: String(payload.message || ''), ts: Date.now() });
+                  io.emit("simulationLog", {
+                    level: payload.level || "info",
+                    message: String(payload.message || ""),
+                    ts: Date.now(),
+                  });
                 }
 
                 // Broadcast visualization and also lightweight stats
@@ -1096,13 +1194,17 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
                   if (typeof payload.step === "number") {
                     status.currentStep = payload.step;
                     if (payload.step >= lastStepLog + 50) {
-                      const vCount = Array.isArray(payload.vehicles) ? payload.vehicles.length : 0;
-                      const tlsCount = Array.isArray(payload.tls) ? payload.tls.length : 0;
+                      const vCount = Array.isArray(payload.vehicles)
+                        ? payload.vehicles.length
+                        : 0;
+                      const tlsCount = Array.isArray(payload.tls)
+                        ? payload.tls.length
+                        : 0;
                       let avgSpeed = 0;
                       if (vCount > 0) {
                         let sum = 0;
                         for (const v of payload.vehicles) {
-                          if (typeof v.speed === 'number') sum += v.speed;
+                          if (typeof v.speed === "number") sum += v.speed;
                         }
                         avgSpeed = Number((sum / vCount).toFixed(2));
                       }
@@ -1124,7 +1226,11 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           sumoBridgeProcess.stderr.on("data", (chunk) => {
             const msg = chunk.toString();
             console.error("[SUMO BRIDGE]", msg);
-            io.emit("simulationLog", { level: "warn", message: msg.trim(), ts: Date.now() });
+            io.emit("simulationLog", {
+              level: "warn",
+              message: msg.trim(),
+              ts: Date.now(),
+            });
           });
 
           sumoBridgeProcess.on("exit", (code) => {
@@ -1133,12 +1239,20 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             status.endTime = new Date();
             status.lastUpdated = new Date();
             status.save().then(() => io.emit("simulationStatus", status));
-            io.emit("simulationLog", { level: (code === 0 ? "info" : "error"), message: `SUMO bridge exited with code ${code}`, ts: Date.now() });
+            io.emit("simulationLog", {
+              level: code === 0 ? "info" : "error",
+              message: `SUMO bridge exited with code ${code}`,
+              ts: Date.now(),
+            });
             console.log(`SUMO bridge exited with code ${code}`);
           });
         } catch (err) {
           console.error("Failed to start SUMO bridge:", err);
-          io.emit("simulationLog", { level: "error", message: `Failed to start SUMO bridge: ${err?.message || err}`, ts: Date.now() });
+          io.emit("simulationLog", {
+            level: "error",
+            message: `Failed to start SUMO bridge: ${err?.message || err}`,
+            ts: Date.now(),
+          });
         }
 
         await recordAudit(req, "start_simulation", "sumo", parameters);
@@ -1232,11 +1346,11 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
   }
 });
 
-// Open SUMO GUI application (admin or super_admin)
+// Open SUMO GUI application (super_admin)
 app.post(
   "/api/sumo/open-gui",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
       const startWithCfg = req.body?.withConfig !== false; // default true
@@ -1246,7 +1360,9 @@ app.post(
         const s = await Settings.findOne();
         selectedConfigName = s?.sumo?.selectedConfig || null;
       } catch (_) {}
-      const cfgPath = resolveSumoConfigPath(selectedConfigName || process.env.SUMO_CONFIG_PATH || "");
+      const cfgPath = resolveSumoConfigPath(
+        selectedConfigName || process.env.SUMO_CONFIG_PATH || ""
+      );
       const guiBinary =
         process.env.SUMO_BINARY_GUI_PATH ||
         (process.platform === "win32" ? "sumo-gui.exe" : "sumo-gui");
@@ -1269,13 +1385,13 @@ app.post(
   }
 );
 
-// Intersection manual override (admin/super_admin)
+// Intersection manual override (super_admin)
 app.post(
   "/api/intersections/:id/override",
   authenticateToken,
   async (req, res) => {
     try {
-      if (!["admin", "super_admin"].includes(req.user.role)) {
+      if (!["super_admin"].includes(req.user.role)) {
         return res.status(403).json({ message: "Insufficient permissions" });
       }
       const intersectionId = req.params.id;
@@ -1311,7 +1427,7 @@ app.post(
   authenticateToken,
   async (req, res) => {
     try {
-      if (!["admin", "super_admin"].includes(req.user.role)) {
+      if (!["super_admin"].includes(req.user.role)) {
         return res.status(403).json({ message: "Insufficient permissions" });
       }
       const doc = await Emergency.findByIdAndUpdate(
@@ -1347,7 +1463,7 @@ app.post(
 app.get(
   "/api/stats/overview",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
       const results = await Promise.allSettled([
@@ -1355,21 +1471,45 @@ app.get(
         Emergency.countDocuments({ active: true }),
         SimulationStatus.findOne().sort({ lastUpdated: -1 }),
         Promise.resolve(mongoose.connection.readyState),
-        TrafficData.countDocuments({ timestamp: { $gte: new Date(Date.now() - 15 * 60 * 1000) } }),
+        TrafficData.countDocuments({
+          timestamp: { $gte: new Date(Date.now() - 15 * 60 * 1000) },
+        }),
       ]);
 
       const [uRes, eRes, sRes, mRes, tRes] = results;
-      const userCount = uRes.status === 'fulfilled' ? Number(uRes.value || 0) : 0;
-      const activeEmergencies = eRes.status === 'fulfilled' ? Number(eRes.value || 0) : 0;
-      const latestStatus = sRes.status === 'fulfilled' ? sRes.value : null;
-      const mongoState = mRes.status === 'fulfilled' ? mRes.value : mongoose.connection.readyState;
-      const recentTrafficDocs = tRes.status === 'fulfilled' ? Number(tRes.value || 0) : 0;
+      const userCount =
+        uRes.status === "fulfilled" ? Number(uRes.value || 0) : 0;
+      const activeEmergencies =
+        eRes.status === "fulfilled" ? Number(eRes.value || 0) : 0;
+      const latestStatus = sRes.status === "fulfilled" ? sRes.value : null;
+      const mongoState =
+        mRes.status === "fulfilled"
+          ? mRes.value
+          : mongoose.connection.readyState;
+      const recentTrafficDocs =
+        tRes.status === "fulfilled" ? Number(tRes.value || 0) : 0;
 
       // Log any failures for debugging without failing the endpoint
-      if (uRes.status === 'rejected') console.warn('[overview] userCount failed:', uRes.reason?.message || uRes.reason);
-      if (eRes.status === 'rejected') console.warn('[overview] emergencies failed:', eRes.reason?.message || eRes.reason);
-      if (sRes.status === 'rejected') console.warn('[overview] sim status failed:', sRes.reason?.message || sRes.reason);
-      if (tRes.status === 'rejected') console.warn('[overview] telemetry count failed:', tRes.reason?.message || tRes.reason);
+      if (uRes.status === "rejected")
+        console.warn(
+          "[overview] userCount failed:",
+          uRes.reason?.message || uRes.reason
+        );
+      if (eRes.status === "rejected")
+        console.warn(
+          "[overview] emergencies failed:",
+          eRes.reason?.message || eRes.reason
+        );
+      if (sRes.status === "rejected")
+        console.warn(
+          "[overview] sim status failed:",
+          sRes.reason?.message || sRes.reason
+        );
+      if (tRes.status === "rejected")
+        console.warn(
+          "[overview] telemetry count failed:",
+          tRes.reason?.message || tRes.reason
+        );
 
       const activeSimulations = latestStatus?.isRunning ? 1 : 0;
 
@@ -1407,7 +1547,13 @@ app.get(
         activeSimulations: 0,
         systemHealth,
         emergencyCount: 0,
-        health: { mongoHealthy, simHealthy: false, telemetryHealthy: false, mongoState, recentTrafficDocs: 0 },
+        health: {
+          mongoHealthy,
+          simHealthy: false,
+          telemetryHealthy: false,
+          mongoState,
+          recentTrafficDocs: 0,
+        },
       });
     }
   }
@@ -1417,7 +1563,7 @@ app.get(
 app.get(
   "/api/stats/admin",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
       const since = new Date(Date.now() - 60 * 60 * 1000);
