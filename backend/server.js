@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const http = require("http");
+const Redis = require("ioredis"); // Import ioredis client
 const socketIo = require("socket.io");
 const { spawn } = require("child_process");
 const path = require("path");
@@ -46,13 +47,25 @@ app.use(
 );
 app.use(express.json());
 
+// Redis Client Initialization
+const redisClient = new Redis({
+  port: process.env.REDIS_PORT || 6379, // Default Redis port
+  host: process.env.REDIS_HOST || "127.0.0.1", // Default Redis host
+  password: process.env.REDIS_PASSWORD || undefined, // If your Redis requires a password
+  // Enable lazy connect to prevent app crash on startup if Redis is not available.
+  // The client will attempt to connect when the first command is executed.
+  lazyConnect: true,
+});
+
+redisClient.on("connect", () => {
+  console.log("Connected to Redis!");
+});
+redisClient.on("error", (err) => console.error("Redis Client Error", err));
+
 // MongoDB Connection
 mongoose.connect(
   process.env.MONGODB_URI || "mongodb://localhost:27017/traffic_management",
-  {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  }
+  {}
 );
 
 const db = mongoose.connection;
@@ -220,6 +233,18 @@ const requireAnyRole = (roles) => {
   };
 };
 
+// This is the correct endpoint for the "Create New User" form in UsersAdmin.jsx
+app.post(
+  "/api/users",
+  authenticateToken,
+  requireRole("super_admin"),
+  async (req, res) => {
+    // Forward the request to the existing /api/register logic
+    // This ensures consistent user creation and cache invalidation logic
+    return app._router.handle(req, res);
+  }
+);
+
 // Simple login rate limiter (memory, per IP)
 const loginAttempts = new Map();
 function rateLimitLogin(req, res, next) {
@@ -312,6 +337,17 @@ app.post("/api/register", async (req, res) => {
     });
 
     await user.save();
+
+    // This is a new user, so we must invalidate the user list cache.
+    try {
+      await redisClient.del("users_list");
+      console.log("Cache invalidated for: users_list");
+    } catch (e) {
+      console.error(
+        "Redis cache invalidation failed for users_list:",
+        e.message
+      );
+    }
 
     res.status(201).json({ message: "User created successfully" });
   } catch (error) {
@@ -423,7 +459,24 @@ app.get(
   requireRole("super_admin"),
   async (req, res) => {
     try {
+      const cacheKey = "users_list";
+      try {
+        const cachedUsers = await redisClient.get(cacheKey);
+        if (cachedUsers) {
+          console.log("Serving user list from Redis cache");
+          return res.json(JSON.parse(cachedUsers));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for users_list:", e.message);
+      }
+
+      console.log("Fetching user list from database...");
       const users = await User.find().select("-password");
+      try {
+        await redisClient.set(cacheKey, JSON.stringify(users)); // Cache indefinitely until an update
+      } catch (e) {
+        console.error("Redis SET failed for users_list:", e.message);
+      }
       res.json(users);
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
@@ -446,6 +499,14 @@ app.put(
       const updated = await User.findByIdAndUpdate(req.params.id, update, {
         new: true,
       }).select("-password");
+
+      // Invalidate cache on update
+      try {
+        await redisClient.del("users_list");
+        console.log("Cache invalidated for: users_list");
+      } catch (e) {
+        console.error("Redis DEL failed for users_list:", e.message);
+      }
       await recordAudit(req, "update_user", req.params.id, { role, region });
       res.json(updated);
     } catch (error) {
@@ -462,6 +523,14 @@ app.delete(
   async (req, res) => {
     try {
       await User.findByIdAndDelete(req.params.id);
+
+      // Invalidate cache on delete
+      try {
+        await redisClient.del("users_list");
+        console.log("Cache invalidated for: users_list");
+      } catch (e) {
+        console.error("Redis DEL failed for users_list:", e.message);
+      }
       await recordAudit(req, "delete_user", req.params.id);
       res.json({ ok: true });
     } catch (error) {
@@ -477,7 +546,22 @@ app.get(
   requireRole("super_admin"),
   async (req, res) => {
     try {
+      const cacheKey = "users_count";
+      try {
+        const cachedCount = await redisClient.get(cacheKey);
+        if (cachedCount) {
+          console.log("Serving user count from Redis cache");
+          return res.json({ count: parseInt(cachedCount, 10) });
+        }
+      } catch (e) {
+        console.error("Redis GET failed for users_count:", e.message);
+      }
       const count = await User.countDocuments({});
+      try {
+        await redisClient.setex(cacheKey, 3600, count); // Cache for 1 hour
+      } catch (e) {
+        console.error("Redis SETEX failed for users_count:", e.message);
+      }
       res.json({ count });
     } catch (e) {
       res
@@ -494,9 +578,26 @@ app.get(
   requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
+      const cacheKey = "system_settings";
+      try {
+        const cachedSettings = await redisClient.get(cacheKey);
+        if (cachedSettings) {
+          console.log("Serving settings from Redis cache");
+          return res.json(JSON.parse(cachedSettings));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for system_settings:", e.message);
+      }
+
+      console.log("Fetching settings from database...");
       let s = await Settings.findOne();
       if (!s) {
         s = await Settings.create({});
+      }
+      try {
+        await redisClient.set(cacheKey, JSON.stringify(s)); // Cache indefinitely until an update
+      } catch (e) {
+        console.error("Redis SET failed for system_settings:", e.message);
       }
       res.json(s);
     } catch (error) {
@@ -517,6 +618,14 @@ app.put(
         { ...body, updatedAt: new Date() },
         { new: true, upsert: true }
       );
+
+      // Invalidate settings cache on update
+      try {
+        await redisClient.del("system_settings");
+        console.log("Cache invalidated for: system_settings");
+      } catch (e) {
+        console.error("Redis DEL failed for system_settings:", e.message);
+      }
       await recordAudit(req, "update_settings", "settings", {});
       res.json(s);
     } catch (error) {
@@ -562,7 +671,23 @@ app.get(
   requireRole("super_admin"),
   async (req, res) => {
     try {
-      const { user, role, startDate, endDate, limit = 200 } = req.query;
+      const { user, role, startDate, endDate, limit = 200 } = req.query; // Use let for query
+
+      // Create a dynamic cache key based on query parameters
+      const cacheKey = `audit_logs:${user || ""}:${role || ""}:${
+        startDate || ""
+      }:${endDate || ""}:${limit}`;
+      try {
+        const cachedLogs = await redisClient.get(cacheKey);
+        if (cachedLogs) {
+          console.log("Serving audit logs from Redis cache");
+          return res.json(JSON.parse(cachedLogs));
+        }
+      } catch (e) {
+        console.error(`Redis GET failed for ${cacheKey}:`, e.message);
+      }
+
+      console.log("Fetching audit logs from database...");
       const query = {};
       if (user) query.user = user;
       if (role) query.role = role;
@@ -574,6 +699,12 @@ app.get(
       const items = await AuditLog.find(query)
         .sort({ time: -1 })
         .limit(parseInt(limit));
+
+      try {
+        await redisClient.setex(cacheKey, 30, JSON.stringify({ items })); // Cache for 30 seconds
+      } catch (e) {
+        console.error(`Redis SETEX failed for ${cacheKey}:`, e.message);
+      }
       res.json({ items });
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
@@ -653,7 +784,21 @@ app.post("/api/traffic-data", authenticateToken, async (req, res) => {
 
 app.get("/api/traffic-data", authenticateToken, async (req, res) => {
   try {
-    const { intersectionId, startDate, endDate, limit = 100 } = req.query;
+    const { intersectionId, startDate, endDate, limit = 100 } = req.query; // Use let for query
+
+    const cacheKey = `traffic_data:${intersectionId || "all"}:${
+      startDate || ""
+    }:${endDate || ""}:${limit}`;
+    try {
+      const cachedData = await redisClient.get(cacheKey);
+      if (cachedData) {
+        console.log("Serving traffic data from Redis cache");
+        return res.json(JSON.parse(cachedData));
+      }
+    } catch (e) {
+      console.error(`Redis GET failed for ${cacheKey}:`, e.message);
+    }
+
     let query = {};
 
     if (intersectionId) {
@@ -670,6 +815,11 @@ app.get("/api/traffic-data", authenticateToken, async (req, res) => {
     const trafficData = await TrafficData.find(query)
       .sort({ timestamp: -1 })
       .limit(parseInt(limit));
+    try {
+      await redisClient.setex(cacheKey, 60, JSON.stringify(trafficData)); // Cache for 60 seconds
+    } catch (e) {
+      console.error(`Redis SETEX failed for ${cacheKey}:`, e.message);
+    }
     res.json(trafficData);
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -723,6 +873,18 @@ app.get(
   requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
+      const cacheKey = "reports_kpis";
+      try {
+        const cachedKpis = await redisClient.get(cacheKey);
+        if (cachedKpis) {
+          console.log("Serving KPIs from Redis cache");
+          return res.json(JSON.parse(cachedKpis));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for reports_kpis:", e.message);
+      }
+
+      console.log("Fetching KPIs from database...");
       const latest = await TrafficData.find()
         .sort({ timestamp: -1 })
         .limit(100);
@@ -733,12 +895,20 @@ app.get(
               latest.length
             ).toFixed(1)
           : 0;
-      res.json({
+      const kpis = {
         uptime: 99.9,
         congestionReduction: 15.2,
         avgResponse: 24,
         avgSpeed: Number(avgSpeed),
-      });
+      };
+
+      // Cache for 60 seconds
+      try {
+        await redisClient.setex(cacheKey, 60, JSON.stringify(kpis));
+      } catch (e) {
+        console.error("Redis SETEX failed for reports_kpis:", e.message);
+      }
+      res.json(kpis);
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
     }
@@ -751,6 +921,18 @@ app.get(
   requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
+      const cacheKey = "reports_trends";
+      try {
+        const cachedTrends = await redisClient.get(cacheKey);
+        if (cachedTrends) {
+          console.log("Serving trends from Redis cache");
+          return res.json(JSON.parse(cachedTrends));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for reports_trends:", e.message);
+      }
+
+      console.log("Fetching trends from database...");
       const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       const data = await TrafficData.find({ timestamp: { $gte: since } });
       const byDay = {};
@@ -768,7 +950,14 @@ app.get(
         avgSpeed: x.count ? Number((x.avgSpeed / x.count).toFixed(1)) : 0,
         emergencies: x.emergencies,
       }));
-      res.json({ daily, weekly: [] });
+      const trends = { daily, weekly: [] };
+
+      try {
+        await redisClient.setex(cacheKey, 300, JSON.stringify(trends)); // Cache for 5 minutes
+      } catch (e) {
+        console.error("Redis SETEX failed for reports_trends:", e.message);
+      }
+      res.json(trends);
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
     }
@@ -778,6 +967,17 @@ app.get(
 // SUMO config endpoints
 app.get("/api/sumo/configs", authenticateToken, async (req, res) => {
   try {
+    const cacheKey = "sumo_configs_list";
+    try {
+      const cachedConfigs = await redisClient.get(cacheKey);
+      if (cachedConfigs) {
+        console.log("Serving SUMO configs from Redis cache");
+        return res.json(JSON.parse(cachedConfigs));
+      }
+    } catch (e) {
+      console.error("Redis GET failed for sumo_configs_list:", e.message);
+    }
+
     const fs = require("fs");
     const dir = DEFAULT_SUMO_CONFIG_DIR;
     const files = fs
@@ -785,12 +985,16 @@ app.get("/api/sumo/configs", authenticateToken, async (req, res) => {
       .filter((d) => d.isFile() && d.name.toLowerCase().endsWith(".sumocfg"))
       .map((d) => d.name)
       .sort();
-    let selected = null;
+    const s = await Settings.findOne();
+    const selected = s?.sumo?.selectedConfig || null;
+    const responseData = { directory: dir, files, selected };
     try {
-      const s = await Settings.findOne();
-      selected = s?.sumo?.selectedConfig || null;
-    } catch (_) {}
-    res.json({ directory: dir, files, selected });
+      // Cache for 10 minutes, invalidated on change.
+      await redisClient.setex(cacheKey, 600, JSON.stringify(responseData));
+    } catch (e) {
+      console.error("Redis SETEX failed for sumo_configs_list:", e.message);
+    }
+    res.json(responseData);
   } catch (e) {
     res
       .status(500)
@@ -825,6 +1029,13 @@ app.put(
         { new: true, upsert: true }
       );
       await recordAudit(req, "set_sumo_config", name);
+      // Invalidate the configs list cache since the 'selected' value has changed.
+      try {
+        await redisClient.del("sumo_configs_list");
+        console.log("Cache invalidated for: sumo_configs_list");
+      } catch (e) {
+        console.error("Redis DEL failed for sumo_configs_list:", e.message);
+      }
       res.json({ ok: true, selected: s?.sumo?.selectedConfig || name });
     } catch (e) {
       res
@@ -1412,9 +1623,26 @@ app.post(
 // Emergencies: list active
 app.get("/api/emergencies", authenticateToken, async (req, res) => {
   try {
+    const cacheKey = "active_emergencies";
+    try {
+      const cachedEmergencies = await redisClient.get(cacheKey);
+      if (cachedEmergencies) {
+        console.log("Serving active emergencies from Redis cache");
+        return res.json(JSON.parse(cachedEmergencies));
+      }
+    } catch (e) {
+      console.error("Redis GET failed for active_emergencies:", e.message);
+    }
+
+    console.log("Fetching active emergencies from database...");
     const items = await Emergency.find({ active: true }).sort({
       createdAt: -1,
     });
+    try {
+      await redisClient.setex(cacheKey, 10, JSON.stringify({ items })); // Cache for 10 seconds
+    } catch (e) {
+      console.error("Redis SETEX failed for active_emergencies:", e.message);
+    }
     res.json({ items });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -1435,6 +1663,14 @@ app.post(
         { active: false },
         { new: true }
       );
+
+      // Invalidate cache on update
+      try {
+        await redisClient.del("active_emergencies");
+        console.log("Cache invalidated for: active_emergencies");
+      } catch (e) {
+        console.error("Redis DEL failed for active_emergencies:", e.message);
+      }
       await recordAudit(req, "force_clear_emergency", req.params.id);
       res.json({ ok: true, item: doc });
     } catch (error) {
@@ -1452,6 +1688,14 @@ app.post(
     try {
       const payload = req.body || {};
       const doc = await Emergency.create(payload);
+
+      // Invalidate cache on creation
+      try {
+        await redisClient.del("active_emergencies");
+        console.log("Cache invalidated for: active_emergencies");
+      } catch (e) {
+        console.error("Redis DEL failed for active_emergencies:", e.message);
+      }
       res.status(201).json({ ok: true, item: doc });
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
@@ -1466,6 +1710,19 @@ app.get(
   requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
+      const cacheKey = "stats_overview";
+      try {
+        const cachedStats = await redisClient.get(cacheKey);
+        if (cachedStats) {
+          console.log("Serving overview stats from Redis cache");
+          return res.json(JSON.parse(cachedStats));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for stats_overview:", e.message);
+      }
+
+      console.log("Fetching overview stats from database...");
+
       const results = await Promise.allSettled([
         User.countDocuments({}),
         Emergency.countDocuments({ active: true }),
@@ -1524,7 +1781,7 @@ app.get(
       score += telemetryHealthy ? 20 : 0;
       const systemHealth = Math.min(100, Math.max(0, score));
 
-      res.json({
+      const overview = {
         userCount,
         activeSimulations,
         systemHealth,
@@ -1536,7 +1793,15 @@ app.get(
           mongoState,
           recentTrafficDocs,
         },
-      });
+      };
+
+      // Cache for 15 seconds
+      try {
+        await redisClient.setex(cacheKey, 15, JSON.stringify(overview));
+      } catch (e) {
+        console.error("Redis SETEX failed for stats_overview:", e.message);
+      }
+      res.json(overview);
     } catch (e) {
       // Absolute fallback: best-effort values with minimal info, never 500
       const mongoState = mongoose.connection.readyState;
@@ -1566,6 +1831,19 @@ app.get(
   requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
+      const cacheKey = "stats_admin";
+      try {
+        const cachedStats = await redisClient.get(cacheKey);
+        if (cachedStats) {
+          console.log("Serving admin stats from Redis cache");
+          return res.json(JSON.parse(cachedStats));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for stats_admin:", e.message);
+      }
+
+      console.log("Fetching admin stats from database...");
+
       const since = new Date(Date.now() - 60 * 60 * 1000);
       const recent = await TrafficData.find({ timestamp: { $gte: since } });
       const vehicleCount = recent.reduce(
@@ -1591,12 +1869,20 @@ app.get(
         active: true,
       });
 
-      res.json({
+      const adminStats = {
         activeVehicles: isNaN(activeVehicles) ? 0 : activeVehicles,
         avgSpeed,
         queueLength,
         emergencyOverrides,
-      });
+      };
+
+      // Cache for 15 seconds
+      try {
+        await redisClient.setex(cacheKey, 15, JSON.stringify(adminStats));
+      } catch (e) {
+        console.error("Redis SETEX failed for stats_admin:", e.message);
+      }
+      res.json(adminStats);
     } catch (e) {
       res
         .status(500)
