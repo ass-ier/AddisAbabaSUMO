@@ -45,6 +45,7 @@ It consists of a Node.js backend (API, SUMO integration) and a React frontend (d
 - npm (v8 or higher)
 - MongoDB (local or Atlas)
 - SUMO (Simulation of Urban Mobility)
+- Docker Desktop (for running Redis)
 - Git
 
 ---
@@ -73,7 +74,23 @@ It consists of a Node.js backend (API, SUMO integration) and a React frontend (d
    SUMO_BINARY_PATH=C:/Program Files (x86)/Eclipse/Sumo/bin/sumo.exe
    ```
 
-4. Start the backend server:
+4. **Run Redis using Docker**
+
+   The backend uses Redis for caching to improve performance. The easiest way to run it is with Docker.
+
+   a. Pull the official Redis image:
+
+   ```sh
+   docker pull redis
+   ```
+
+   b. Start the Redis container:
+
+   ```sh
+   docker run -d -p 6379:6379 --name traffic-redis --restart always redis
+   ```
+
+5. Start the backend server:
    ```sh
    npm run dev
    ```
