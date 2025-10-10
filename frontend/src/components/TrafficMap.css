@@ -108,6 +108,33 @@
   transform: translate3d(0, 0, 0);
 }
 
+/* Enhanced Traffic Light Icons */
+.enhanced-tls-icon {
+  background: transparent !important;
+  border: none !important;
+  transform: translate3d(0, 0, 0);
+}
+
+.enhanced-tls-icon > div {
+  transition: all 0.3s ease;
+}
+
+.enhanced-tls-icon:hover > div {
+  transform: scale(1.1);
+  box-shadow: 0 5px 15px rgba(0,0,0,0.4);
+}
+
+/* Traffic light pulse animation for active lights */
+@keyframes pulse {
+  0% { box-shadow: 0 0 3px rgba(0,0,0,0.5); }
+  50% { box-shadow: 0 0 8px rgba(255,255,255,0.8); }
+  100% { box-shadow: 0 0 3px rgba(0,0,0,0.5); }
+}
+
+.enhanced-tls-icon .light-active {
+  animation: pulse 2s ease-in-out infinite;
+}
+
 /* Modern intersection dot */
 .intersection-dot {
   width: 14px;

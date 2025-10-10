@@ -16,6 +16,8 @@ import io from "socket.io-client";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../utils/api";
 import { parseSumoNetXml } from "../utils/sumoNetParser";
+import TrafficLightModal from "./TrafficLightModal";
+import { TrafficLightPhasePreview } from "./TrafficLightPhaseViz";
 // Optional clustering: keep footprint tiny without extra deps by grouping by grid
 
 // Fix for default markers in react-leaflet
@@ -162,6 +164,11 @@ const TrafficMap = () => {
   const [refreshInterval, setRefreshInterval] = useState(5000); // 5 seconds
   const socketRef = useRef(null);
   const { user } = useAuth();
+  const canOverride = !!(user && (user.role === 'super_admin' || user.role === 'operator'));
+  
+  // Traffic light modal state
+  const [selectedTlsId, setSelectedTlsId] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // SUMO Net (client-side .net.xml) view state
   const [sumoNetMode, setSumoNetMode] = useState(true);
@@ -467,10 +474,19 @@ const TrafficMap = () => {
             setEdgeCongestion(agg);
           }
           if (payload.tls) {
-            // Keep TLS state by ID regardless of coordinates; include per-side summary if provided
+            // Keep TLS state by ID regardless of coordinates; include per-side summary and timing/program if provided
             next.tls = payload.tls
               .filter((t) => t && typeof t.id === 'string')
-              .map((t) => ({ id: t.id, state: t.state, sides: t.sides }));
+              .map((t) => ({
+                id: t.id,
+                state: t.state,
+                sides: t.sides,
+                turns: t.turns,
+                lat: typeof t.lat === 'number' ? t.lat : undefined,
+                lon: typeof t.lon === 'number' ? t.lon : undefined,
+                timing: t.timing,
+                program: t.program,
+              }));
           }
           // Optional future: tls/intersections mapping
         }
@@ -535,6 +551,19 @@ const TrafficMap = () => {
     return { red, yellow, green, total, redPct: red/total, yellowPct: yellow/total, greenPct: green/total };
   };
 
+  // Small phase preview bar (r/y/g composition)
+  const PhasePreview = ({ state }) => {
+    const { redPct, yellowPct, greenPct } = summarizeTlsState(state);
+    const seg = (w, c) => (<div style={{ width: `${Math.max(8, Math.round(w*36))}px`, height: 6, background: c, borderRadius: 3 }} />);
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        {seg(redPct, '#D7263D')}
+        {seg(yellowPct, '#FFC107')}
+        {seg(greenPct, '#25A244')}
+      </div>
+    );
+  };
+
   // Dynamic TLS icon showing current phase distribution and state text
   const createTlsIconDynamic = (stateStr) => {
     const { redPct, yellowPct, greenPct } = summarizeTlsState(stateStr);
@@ -570,8 +599,102 @@ const TrafficMap = () => {
     return L.divIcon({ className: 'tls-panel-icon', html, iconSize: [22, 22], iconAnchor: [11, 11] });
   };
 
+  // Enhanced traffic light icon with current state visualization
+  const createEnhancedTlsIcon = (tlsData) => {
+    const state = tlsData?.state || '';
+    const size = 32;
+    
+    // Create a more sophisticated traffic light icon
+    const html = `
+      <div style="
+        width: ${size}px;
+        height: ${size}px;
+        background: linear-gradient(145deg, #2c3e50, #34495e);
+        border-radius: 6px;
+        border: 2px solid #fff;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        position: relative;
+        transition: all 0.2s ease;
+      ">
+        <!-- Top light indicator -->
+        <div style="
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: ${state.toLowerCase().includes('g') ? '#25A244' : '#666'};
+          margin: 1px 0;
+          box-shadow: 0 0 3px rgba(0,0,0,0.5);
+        "></div>
+        <!-- Middle light indicator -->
+        <div style="
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: ${state.toLowerCase().includes('y') ? '#FFC107' : '#666'};
+          margin: 1px 0;
+          box-shadow: 0 0 3px rgba(0,0,0,0.5);
+        "></div>
+        <!-- Bottom light indicator -->
+        <div style="
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: ${state.toLowerCase().includes('r') ? '#D7263D' : '#666'};
+          margin: 1px 0;
+          box-shadow: 0 0 3px rgba(0,0,0,0.5);
+        "></div>
+        <!-- Clickable indicator -->
+        <div style="
+          position: absolute;
+          top: -2px;
+          right: -2px;
+          width: 8px;
+          height: 8px;
+          background: #1976D2;
+          border: 1px solid #fff;
+          border-radius: 50%;
+          font-size: 6px;
+          color: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">i</div>
+      </div>
+    `;
+    
+    return L.divIcon({
+      className: 'enhanced-tls-icon',
+      html,
+      iconSize: [size, size],
+      iconAnchor: [size/2, size/2]
+    });
+  };
+  
   // Fallback emoji icon
   const tlsEmojiIcon = () => L.divIcon({ className: 'custom-traffic-icon', html: '<div style="font-size:18px; line-height:18px">🚦</div>', iconSize: [18, 18], iconAnchor: [9, 9] });
+  
+  // Handle traffic light click
+  const handleTlsClick = (tlsId, tlsData) => {
+    setSelectedTlsId(tlsId);
+    setIsModalOpen(true);
+  };
+  
+  // Close modal handler
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setSelectedTlsId(null);
+  };
+  
+  // Get selected TLS data for modal
+  const getSelectedTlsData = () => {
+    if (!selectedTlsId || !Array.isArray(mapData.tls)) return null;
+    return mapData.tls.find(t => t.id === selectedTlsId);
+  };
 
 
 
@@ -738,18 +861,92 @@ const TrafficMap = () => {
               return sumoNetData.tls.map((t) => {
                 const live = liveMap.get(t.id) || {};
                 const st = live.state;
-                const sides = live.sides;
-                const icon = tlsEmojiIcon(); // popup will display detailed per-lane panel
+                const timing = live.timing || {};
+                const prog = live.program || {};
+                
+                // Use enhanced icon with current state visualization
+                const icon = createEnhancedTlsIcon(live);
+                
+                const fmt = (s) => {
+                  const v = Math.max(0, Math.round(Number(s || 0)));
+                  const m = Math.floor(v / 60);
+                  const ss = v % 60;
+                  return `${m}:${String(ss).padStart(2,'0')}`;
+                };
+                
                 return (
-                  <Marker key={t.id} position={[t.lat, t.lng]} icon={icon}>
+                  <Marker 
+                    key={t.id} 
+                    position={[t.lat, t.lng]} 
+                    icon={icon}
+                    eventHandlers={{
+                      click: () => handleTlsClick(t.id, live)
+                    }}
+                  >
                     <Popup>
                       <div>
-                        <div style={{ fontWeight: 700 }}>TLS {t.id}</div>
-                        {/* Movement-aware arrows per side (L/S/R) when available; fallback to per-side arrows */}
-                        {live?.turns ? (
-                          <TlsTurnArrowsLayout turns={live.turns} />
-                        ) : (
-                          <TlsArrowsLayout sides={live?.sides} />
+                        <div style={{ fontWeight: 700, marginBottom: 8 }}>TLS {t.id}</div>
+                        
+                        {/* Current State Summary */}
+                        <div style={{ marginBottom: 12 }}>
+                          {st && (
+                            <div style={{ marginBottom: 8 }}>
+                              <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Current Phase State:</div>
+                              <TrafficLightPhasePreview phaseState={st} width={120} height={16} />
+                            </div>
+                          )}
+                          
+                          {typeof timing.currentIndex === 'number' && (
+                            <div style={{ fontSize: 12, color: '#374151' }}>
+                              Phase {timing.currentIndex + 1}
+                              {typeof timing.remaining === 'number' && (
+                                <span style={{ marginLeft: 8, fontWeight: 600, color: '#1976D2' }}>
+                                  ({fmt(timing.remaining)} remaining)
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Quick action for authorized users */}
+                        {canOverride && (
+                          <div style={{ textAlign: 'center', marginTop: 12 }}>
+                            <button
+                              className="action-btn primary"
+                              onClick={() => handleTlsClick(t.id, live)}
+                              style={{ 
+                                padding: '8px 16px', 
+                                fontSize: '12px',
+                                background: '#1976D2',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              🚦 Control Traffic Light
+                            </button>
+                          </div>
+                        )}
+                        
+                        {!canOverride && (
+                          <div style={{ textAlign: 'center', marginTop: 12 }}>
+                            <button
+                              className="action-btn secondary"
+                              onClick={() => handleTlsClick(t.id, live)}
+                              style={{ 
+                                padding: '8px 16px', 
+                                fontSize: '12px',
+                                background: '#f5f5f5',
+                                color: '#333',
+                                border: '1px solid #ddd',
+                                borderRadius: '4px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              👁 View Status
+                            </button>
+                          </div>
                         )}
                       </div>
                     </Popup>
@@ -822,6 +1019,17 @@ const TrafficMap = () => {
             </div>
           </div>
         </div>
+        
+        {/* Traffic Light Control Modal */}
+        {selectedTlsId && (
+          <TrafficLightModal
+            tlsId={selectedTlsId}
+            isOpen={isModalOpen}
+            onClose={handleModalClose}
+            timing={getSelectedTlsData()?.timing}
+            program={getSelectedTlsData()?.program}
+          />
+        )}
     </PageLayout>
   );
 };

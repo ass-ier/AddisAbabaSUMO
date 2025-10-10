@@ -127,6 +127,26 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // TLS controls
+  tlsNextPhase: async (id) =>
+    fetchJson(`${BASE_API}/api/tls/${id}/phase`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ action: "next" }),
+    }),
+  tlsPrevPhase: async (id) =>
+    fetchJson(`${BASE_API}/api/tls/${id}/phase`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ action: "prev" }),
+    }),
+  tlsSetPhase: async (id, phaseIndex) =>
+    fetchJson(`${BASE_API}/api/tls/${id}/phase`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ action: "set", phaseIndex }),
+    }),
+
   // Emergencies
   listEmergencies: async () =>
     fetchJson(`${BASE_API}/api/emergencies`, { headers: authHeaders() }),

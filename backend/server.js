@@ -1045,6 +1045,19 @@ app.put(
   }
 );
 
+// Helper to send a command to the running SUMO bridge (stdin JSON line)
+function sendBridgeCommand(obj) {
+  try {
+    if (!sumoBridgeProcess || !sumoBridgeProcess.stdin) return false;
+    const line = JSON.stringify(obj) + "\n";
+    sumoBridgeProcess.stdin.write(line, "utf8");
+    return true;
+  } catch (e) {
+    console.error("Failed to send command to bridge:", e.message);
+    return false;
+  }
+}
+
 // SUMO integration endpoints
 app.get("/api/sumo/status", authenticateToken, async (req, res) => {
   try {
@@ -1592,6 +1605,42 @@ app.post(
       return res
         .status(500)
         .json({ message: "Failed to open SUMO GUI", error: e.message });
+    }
+  }
+);
+
+// TLS phase control (super_admin, operator)
+app.post(
+  "/api/tls/:id/phase",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      if (!["super_admin", "operator"].includes(req.user.role)) {
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+      if (!sumoBridgeProcess) {
+        return res.status(409).json({ message: "SUMO bridge is not running" });
+      }
+      const tlsId = req.params.id;
+      const { action, phaseIndex } = req.body || {};
+      if (!tlsId || !action || !["next", "prev", "set"].includes(action)) {
+        return res.status(400).json({ message: "Invalid action" });
+      }
+      const cmd = { type: "tls", id: tlsId, cmd: action };
+      if (action === "set") {
+        if (typeof phaseIndex !== "number") {
+          return res.status(400).json({ message: "phaseIndex required for set" });
+        }
+        cmd.phaseIndex = phaseIndex;
+      }
+      const ok = sendBridgeCommand(cmd);
+      if (!ok) {
+        return res.status(500).json({ message: "Failed to send command to bridge" });
+      }
+      await recordAudit(req, "tls_phase_control", tlsId, { action, phaseIndex });
+      return res.json({ ok: true });
+    } catch (error) {
+      return res.status(500).json({ message: "Server error", error: error.message });
     }
   }
 );

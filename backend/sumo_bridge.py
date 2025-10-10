@@ -6,6 +6,8 @@ import time
 import argparse
 import xml.etree.ElementTree as ET
 from math import cos, sin, radians, atan2, degrees
+import threading
+import queue
 
 # Try to add SUMO tools to path for traci
 if 'SUMO_HOME' in os.environ:
@@ -86,6 +88,75 @@ def build_network_payload(net_path):
 
 def main():
     args = parse_args()
+
+    # Set up stdin command queue (non-blocking via thread)
+    cmd_queue = queue.Queue()
+
+    def stdin_reader(q: queue.Queue):
+        try:
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    cmd = json.loads(line)
+                    q.put(cmd)
+                except Exception:
+                    print(json.dumps({"type": "log", "level": "warn", "message": f"Malformed command: {line}"}))
+                    sys.stdout.flush()
+        except Exception:
+            # stdin closed or not readable
+            pass
+
+    reader_thread = threading.Thread(target=stdin_reader, args=(cmd_queue,), daemon=True)
+    reader_thread.start()
+
+    def handle_command(cmd: dict):
+        try:
+            if not isinstance(cmd, dict):
+                return
+            if cmd.get('type') != 'tls':
+                return
+            tls_id = cmd.get('id')
+            if not tls_id:
+                return
+            action = cmd.get('cmd')
+            if action == 'next':
+                try:
+                    cur = traci.trafficlight.getPhase(tls_id)
+                    num = traci.trafficlight.getPhaseNumber(tls_id)
+                    traci.trafficlight.setPhase(tls_id, (cur + 1) % max(1, num))
+                    print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: next phase"}))
+                    sys.stdout.flush()
+                except Exception as e:
+                    print(json.dumps({"type": "log", "level": "error", "message": f"TLS {tls_id}: next failed: {e}"}))
+                    sys.stdout.flush()
+            elif action == 'prev':
+                try:
+                    cur = traci.trafficlight.getPhase(tls_id)
+                    num = traci.trafficlight.getPhaseNumber(tls_id)
+                    traci.trafficlight.setPhase(tls_id, (cur - 1 + max(1, num)) % max(1, num))
+                    print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: previous phase"}))
+                    sys.stdout.flush()
+                except Exception as e:
+                    print(json.dumps({"type": "log", "level": "error", "message": f"TLS {tls_id}: prev failed: {e}"}))
+                    sys.stdout.flush()
+            elif action == 'set':
+                try:
+                    idx = int(cmd.get('phaseIndex'))
+                    num = traci.trafficlight.getPhaseNumber(tls_id)
+                    if 0 <= idx < max(1, num):
+                        traci.trafficlight.setPhase(tls_id, idx)
+                        print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: set phase {idx}"}))
+                        sys.stdout.flush()
+                    else:
+                        print(json.dumps({"type": "log", "level": "warn", "message": f"TLS {tls_id}: invalid phase index {idx}"}))
+                        sys.stdout.flush()
+                except Exception as e:
+                    print(json.dumps({"type": "log", "level": "error", "message": f"TLS {tls_id}: set failed: {e}"}))
+                    sys.stdout.flush()
+        except Exception:
+            pass
 
     # RL mode: run targeted env with PPO model controlling traffic lights
     if args.rl_model:
@@ -175,6 +246,52 @@ def main():
                     for tls_id in traci.trafficlight.getIDList():
                         state = traci.trafficlight.getRedYellowGreenState(tls_id)
                         tls_obj = {'id': tls_id, 'state': state}
+                        # Timing info
+                        try:
+                            sim_t = float(traci.simulation.getTime())
+                            cur_idx = int(traci.trafficlight.getPhase(tls_id))
+                            num_phases = int(traci.trafficlight.getPhaseNumber(tls_id))
+                            next_sw = float(traci.trafficlight.getNextSwitch(tls_id))
+                            remaining = max(0.0, next_sw - sim_t)
+                            nxt_idx = (cur_idx + 1) % max(1, num_phases)
+                            tls_obj['timing'] = {
+                                'currentIndex': cur_idx,
+                                'numPhases': num_phases,
+                                'remaining': remaining,
+                                'nextIndex': nxt_idx,
+                                'nextSwitch': next_sw,
+                                'simTime': sim_t
+                            }
+                        except Exception:
+                            pass
+                        # Program definition
+                        try:
+                            prog_id = traci.trafficlight.getProgram(tls_id)
+                            phases_info = []
+                            try:
+                                defs = traci.trafficlight.getCompleteRedYellowGreenDefinition(tls_id)
+                                chosen = None
+                                for lg in defs:
+                                    pid = getattr(lg, 'programID', getattr(lg, 'programID', None))
+                                    if pid == prog_id or chosen is None:
+                                        chosen = lg
+                                if chosen is not None:
+                                    for idx, ph in enumerate(getattr(chosen, 'phases', [])):
+                                        try:
+                                            phases_info.append({
+                                                'index': idx,
+                                                'state': getattr(ph, 'state', ''),
+                                                'duration': float(getattr(ph, 'duration', 0) or 0),
+                                                'minDur': float(getattr(ph, 'minDur', 0) or 0),
+                                                'maxDur': float(getattr(ph, 'maxDur', 0) or 0)
+                                            })
+                                        except Exception:
+                                            phases_info.append({'index': idx})
+                            except Exception:
+                                pass
+                            tls_obj['program'] = { 'id': prog_id, 'phases': phases_info }
+                        except Exception:
+                            pass
                         # Approximate TLS center from controlled lanes
                         x_c = None; y_c = None
                         try:
@@ -322,6 +439,14 @@ def main():
                 }
                 print(json.dumps(payload)); sys.stdout.flush()
 
+                # Drain and handle any pending commands from stdin
+                try:
+                    while True:
+                        cmd = cmd_queue.get_nowait()
+                        handle_command(cmd)
+                except Exception:
+                    pass
+
                 if done or truncated:
                     break
         except KeyboardInterrupt:
@@ -426,6 +551,52 @@ def main():
                 for tls_id in traci.trafficlight.getIDList():
                     state = traci.trafficlight.getRedYellowGreenState(tls_id)
                     tls_obj = {'id': tls_id, 'state': state}
+                    # Timing info
+                    try:
+                        sim_t = float(traci.simulation.getTime())
+                        cur_idx = int(traci.trafficlight.getPhase(tls_id))
+                        num_phases = int(traci.trafficlight.getPhaseNumber(tls_id))
+                        next_sw = float(traci.trafficlight.getNextSwitch(tls_id))
+                        remaining = max(0.0, next_sw - sim_t)
+                        nxt_idx = (cur_idx + 1) % max(1, num_phases)
+                        tls_obj['timing'] = {
+                            'currentIndex': cur_idx,
+                            'numPhases': num_phases,
+                            'remaining': remaining,
+                            'nextIndex': nxt_idx,
+                            'nextSwitch': next_sw,
+                            'simTime': sim_t
+                        }
+                    except Exception:
+                        pass
+                    # Program definition
+                    try:
+                        prog_id = traci.trafficlight.getProgram(tls_id)
+                        phases_info = []
+                        try:
+                            defs = traci.trafficlight.getCompleteRedYellowGreenDefinition(tls_id)
+                            chosen = None
+                            for lg in defs:
+                                pid = getattr(lg, 'programID', getattr(lg, 'programID', None))
+                                if pid == prog_id or chosen is None:
+                                    chosen = lg
+                            if chosen is not None:
+                                for idx, ph in enumerate(getattr(chosen, 'phases', [])):
+                                    try:
+                                        phases_info.append({
+                                            'index': idx,
+                                            'state': getattr(ph, 'state', ''),
+                                            'duration': float(getattr(ph, 'duration', 0) or 0),
+                                            'minDur': float(getattr(ph, 'minDur', 0) or 0),
+                                            'maxDur': float(getattr(ph, 'maxDur', 0) or 0)
+                                        })
+                                    except Exception:
+                                        phases_info.append({'index': idx})
+                        except Exception:
+                            pass
+                        tls_obj['program'] = { 'id': prog_id, 'phases': phases_info }
+                    except Exception:
+                        pass
                     # Approximate TLS center from controlled lanes
                     x_c = None; y_c = None
                     try:
@@ -577,6 +748,14 @@ def main():
             }
             print(json.dumps(payload))
             sys.stdout.flush()
+
+            # Drain and handle any pending commands from stdin
+            try:
+                while True:
+                    cmd = cmd_queue.get_nowait()
+                    handle_command(cmd)
+            except Exception:
+                pass
 
     except KeyboardInterrupt:
         pass
