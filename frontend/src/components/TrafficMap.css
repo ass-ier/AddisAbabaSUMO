@@ -194,6 +194,31 @@
   transition: transform 0.2s ease;
 }
 
+/* Loading spinner animation */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Performance optimizations */
+.leaflet-container {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+.leaflet-tile-pane {
+  transform: translateZ(0);
+}
+
+/* Reduce repaints */
+.custom-traffic-icon,
+.emergency-vehicle-icon,
+.enhanced-tls-icon {
+  will-change: transform;
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
 /* Traffic signal animations */
 .traffic-signal .light-active {
   transition: opacity 250ms ease, filter 250ms ease;

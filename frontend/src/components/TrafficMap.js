@@ -254,6 +254,7 @@ const FitBoundsController = ({ bounds }) => {
 };
 
 const TrafficMap = () => {
+  // Initialize mapData with safe defaults to prevent undefined errors
   const [mapData, setMapData] = useState({
     intersections: [],
     vehicles: [],
@@ -324,12 +325,16 @@ const TrafficMap = () => {
       .map((e) => ({ id: e.id, points: e.rep.points, speedLimit: e.speed || 13.89 }));
   }, [simNetLanes, sumoNetData.lanes]);
 
-  // Compute batches for rendering performance
+  // Compute batches for rendering performance (optimized)
   const edgeBatches = useMemo(() => {
+    if (edgeGeoms.length === 0) return [];
+    
     const all = edgeGeoms.map((e) => e.points);
-    const batchSize = 2000; // number of edges per Polyline
+    const batchSize = 500; // Reduced batch size for better performance
     const batches = [];
-    for (let i = 0; i < all.length; i += batchSize) batches.push(all.slice(i, i + batchSize));
+    for (let i = 0; i < all.length; i += batchSize) {
+      batches.push(all.slice(i, i + batchSize));
+    }
     return batches;
   }, [edgeGeoms]);
 
@@ -343,25 +348,31 @@ const TrafficMap = () => {
     return m;
   }, [sumoNetData.lanes]);
 
-  // Internal connector lanes to fill junctions
+  // Internal connector lanes to fill junctions (optimized)
   const internalBatches = useMemo(() => {
     const lanes = Array.isArray(sumoNetData.lanes) ? sumoNetData.lanes : [];
+    if (lanes.length === 0) return [];
+    
     const internals = lanes.filter((l) => l.isInternal).map((l) => l.points);
-    const batchSize = 2000;
+    const batchSize = 300; // Smaller batches for better performance
     const batches = [];
-    for (let i = 0; i < internals.length; i += batchSize) batches.push(internals.slice(i, i + batchSize));
+    for (let i = 0; i < internals.length; i += batchSize) {
+      batches.push(internals.slice(i, i + batchSize));
+    }
     return batches;
   }, [sumoNetData.lanes]);
 
-  // Live congestion map per edge from vehicle count
-  const [edgeCongestion, setEdgeCongestion] = useState({}); // Now stores vehicle count per edge
+  // Live congestion map per edge from vehicle count (with throttling)
+  const [edgeCongestion, setEdgeCongestion] = useState(new Map()); // Use Map for better performance
+  const lastUpdateRef = useRef(0);
+  const UPDATE_THROTTLE = 500; // Update every 500ms max
 
   // Enhanced congestion overlay - classify roads by vehicle count (green = light traffic, yellow = moderate, red = heavy)
   const congestedClasses = useMemo(() => {
     const classes = { green: [], yellow: [], red: [], default: [] };
     
     for (const e of edgeGeoms) {
-      const vehicleCount = edgeCongestion[e.id];
+      const vehicleCount = edgeCongestion.get?.(e.id) || (typeof edgeCongestion === 'object' ? edgeCongestion[e.id] : 0);
       
       // If no vehicles on this edge yet, show as default green (open road)
       if (typeof vehicleCount !== 'number' || vehicleCount === 0) {
@@ -381,6 +392,7 @@ const TrafficMap = () => {
         classes.green.push(e.points);
       }
     }
+    
     return classes;
   }, [edgeGeoms, edgeCongestion]);
 
@@ -493,13 +505,26 @@ const TrafficMap = () => {
     try {
       setLoading(true);
       // Keep existing live data if any; only use mock as fallback when nothing has arrived yet
-      setMapData((prev) => ({
-        ...mockData,
-        lanes: prev.lanes?.length ? prev.lanes : [],
-        geoBounds: prev.geoBounds || null,
-        vehicles: prev.vehicles?.length ? prev.vehicles : mockData.vehicles,
-        tls: Array.isArray(prev.tls) ? prev.tls : [],
-      }));
+      setMapData((prev) => {
+        // Ensure prev is never undefined
+        const prevData = prev || {
+          intersections: [],
+          vehicles: [],
+          emergencyVehicles: [],
+          trafficFlow: [],
+          lanes: [],
+          geoBounds: null,
+          tls: [],
+        };
+        
+        return {
+          ...mockData,
+          lanes: prevData.lanes?.length ? prevData.lanes : [],
+          geoBounds: prevData.geoBounds || null,
+          vehicles: prevData.vehicles?.length ? prevData.vehicles : mockData.vehicles,
+          tls: Array.isArray(prevData.tls) ? prevData.tls : [],
+        };
+      });
     } catch (error) {
       console.error("Error fetching map data:", error);
       window.dispatchEvent(
@@ -523,8 +548,19 @@ const TrafficMap = () => {
     // Network geometry (lanes) arrives first with type 'net'
     socketRef.current.on("viz", (payload) => {
       setMapData((prev) => {
+        // Ensure prev is never undefined
+        const prevData = prev || {
+          intersections: [],
+          vehicles: [],
+          emergencyVehicles: [],
+          trafficFlow: [],
+          lanes: [],
+          geoBounds: null,
+          tls: [],
+        };
+        
         // payload from backend includes both 'net' (lanes) and 'viz' (vehicles)
-        const next = { ...prev };
+        const next = { ...prevData };
         if (payload.type === "net") {
           const lanes = Array.isArray(payload.lanes) ? payload.lanes : [];
           next.lanes = lanes
@@ -575,20 +611,29 @@ const TrafficMap = () => {
               }));
             next.vehicles = vehicles;
 
-            // Update congestion map by counting vehicles per edgeId
+            // Update congestion map by counting vehicles per edgeId (optimized with throttling)
+            const now = Date.now();
+            if (now - lastUpdateRef.current < UPDATE_THROTTLE) {
+              return; // Skip update if too frequent
+            }
+            lastUpdateRef.current = now;
+            
             const vehicleCount = new Map();
+            
             for (const v of vehicles) {
-              const eid = v.edgeId;
+              // Try multiple possible edge ID fields
+              const eid = v.edgeId || v.laneId;
               if (!eid) continue;
-              const count = vehicleCount.get(eid) || 0;
-              vehicleCount.set(eid, count + 1);
+              
+              // Extract edge ID from lane ID if needed (format: edgeId_laneNumber)
+              const actualEdgeId = typeof eid === 'string' && eid.includes('_') ? 
+                eid.substring(0, eid.lastIndexOf('_')) : eid;
+              
+              vehicleCount.set(actualEdgeId, (vehicleCount.get(actualEdgeId) || 0) + 1);
             }
-            // Convert to plain object
-            const congestionData = {};
-            for (const [eid, count] of vehicleCount.entries()) {
-              congestionData[eid] = count;
-            }
-            setEdgeCongestion(congestionData);
+            
+            // Use Map directly for better performance
+            setEdgeCongestion(vehicleCount);
           }
           if (payload.tls) {
             // Keep TLS state by ID regardless of coordinates; include per-side summary and timing/program if provided
@@ -624,16 +669,73 @@ const TrafficMap = () => {
   }, [autoRefresh, refreshInterval, fetchMapData]);
 
 
-  // Load SUMO .net.xml from public folder and render with CRS.Simple (Netedit-like)
+  // Network data caching utilities
+  const CACHE_KEY = 'sumo_network_cache';
+  const CACHE_VERSION = '1.0';
+  const CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
+
+  const getCachedNetworkData = () => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (!cached) return null;
+      
+      const { data, timestamp, version } = JSON.parse(cached);
+      
+      // Check if cache is expired or version mismatch
+      if (Date.now() - timestamp > CACHE_EXPIRY || version !== CACHE_VERSION) {
+        localStorage.removeItem(CACHE_KEY);
+        return null;
+      }
+      
+      return data;
+    } catch (e) {
+      localStorage.removeItem(CACHE_KEY);
+      return null;
+    }
+  };
+
+  const setCachedNetworkData = (data) => {
+    try {
+      const cacheData = {
+        data,
+        timestamp: Date.now(),
+        version: CACHE_VERSION
+      };
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+    } catch (e) {
+      console.warn('Failed to cache network data:', e);
+    }
+  };
+
+  // Load SUMO .net.xml from public folder with caching
   const loadSumoNetLocal = async (path = "/Sumoconfigs/AddisAbaba.net.xml") => {
     try {
       setLoading(true);
+      
+      // Try to load from cache first
+      const cachedData = getCachedNetworkData();
+      if (cachedData) {
+        setSumoNetData(cachedData);
+        setSumoNetMode(true);
+        window.dispatchEvent(
+          new CustomEvent("notify", {
+            detail: { type: "success", message: "Loaded SUMO network from cache" },
+          })
+        );
+        return;
+      }
+      
+      // If no cache, parse from file
       const data = await parseSumoNetXml(path);
+      
+      // Cache the parsed data
+      setCachedNetworkData(data);
+      
       setSumoNetData(data);
       setSumoNetMode(true);
       window.dispatchEvent(
         new CustomEvent("notify", {
-          detail: { type: "success", message: "Loaded SUMO network" },
+          detail: { type: "success", message: "Loaded and cached SUMO network" },
         })
       );
     } catch (e) {
@@ -809,7 +911,7 @@ const TrafficMap = () => {
   
   // Get selected TLS data for modal
   const getSelectedTlsData = () => {
-    if (!selectedTlsId || !Array.isArray(mapData.tls)) return null;
+    if (!selectedTlsId || !Array.isArray(mapData?.tls)) return null;
     return mapData.tls.find(t => t.id === selectedTlsId);
   };
 
@@ -884,22 +986,22 @@ const TrafficMap = () => {
       <div className="top-stats">
         <div className="kpi">
           <span className="kpi-label">Active Vehicles</span>
-          <span className="kpi-value">{Array.isArray(mapData.vehicles) ? mapData.vehicles.length : 0}</span>
+          <span className="kpi-value">{Array.isArray(mapData?.vehicles) ? mapData.vehicles.length : 0}</span>
         </div>
         <div className="kpi">
           <span className="kpi-label">Emergency Units</span>
           <span className="kpi-value" style={{ color: "#E53935" }}>
-            {Array.isArray(mapData.vehicles) ? mapData.vehicles.filter(v => v.type === 'ambulance' || v.type === 'fire_truck' || v.type === 'police').length : 0}
+            {Array.isArray(mapData?.vehicles) ? mapData.vehicles.filter(v => v.type === 'ambulance' || v.type === 'fire_truck' || v.type === 'police').length : 0}
           </span>
         </div>
         <div className="kpi">
           <span className="kpi-label">Traffic Status</span>
           <span className="kpi-value" style={{ 
-            color: Object.keys(edgeCongestion).length > 0 ? 
+            color: (edgeCongestion?.size || 0) > 0 ? 
               (congestedClasses.red.length > 0 ? '#F44336' : congestedClasses.yellow.length > 0 ? '#FFC107' : '#4CAF50') : 
               '#4CAF50'
           }}>
-            {Object.keys(edgeCongestion).length === 0 ? 'All Clear' : 
+            {(edgeCongestion?.size || 0) === 0 ? 'All Clear' : 
              congestedClasses.red.length > 0 ? 'Congested' : 
              congestedClasses.yellow.length > 0 ? 'Moderate' : 'Free Flow'}
           </span>
@@ -909,7 +1011,37 @@ const TrafficMap = () => {
       <div className="traffic-map-container">
 
         {/* Map Container */}
-        <div className="map-wrapper" style={{ width: "100%" }}>
+        <div className="map-wrapper" style={{ width: "100%", position: "relative" }}>
+          {/* Loading overlay */}
+          {loading && (
+            <div style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: "rgba(255, 255, 255, 0.9)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1000,
+              flexDirection: "column",
+              gap: "16px"
+            }}>
+              <div style={{
+                width: "48px",
+                height: "48px",
+                border: "4px solid #e3f2fd",
+                borderTop: "4px solid #1976d2",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite"
+              }} />
+              <div style={{ fontSize: "16px", fontWeight: "500", color: "#1976d2" }}>
+                Loading Traffic Map...
+              </div>
+            </div>
+          )}
+          
           <MapContainer
             key="sumo-net"
             crs={L.CRS.Simple}
@@ -993,7 +1125,7 @@ const TrafficMap = () => {
 
             {/* TLS from .net.xml positions with live phase state from simulation */}
             {mapView === "traffic" && Array.isArray(sumoNetData.tls) && (() => {
-              const liveMap = new Map((Array.isArray(mapData.tls) ? mapData.tls : []).map((t) => [t.id, t]));
+              const liveMap = new Map((Array.isArray(mapData?.tls) ? mapData.tls : []).map((t) => [t.id, t]));
               return sumoNetData.tls.map((t) => {
                 const live = liveMap.get(t.id) || {};
                 const st = live.state;
@@ -1091,26 +1223,27 @@ const TrafficMap = () => {
               });
             })()}
 
-            {/* Emergency vehicles only - special icons for emergency vehicles */}
-            {Array.isArray(mapData.vehicles) &&
-              mapData.vehicles
-                .filter((v) => 
-                  typeof v.netLat === "number" && 
-                  typeof v.netLng === "number" &&
-                  (v.type === "ambulance" || v.type === "fire_truck" || v.type === "police")
-                )
-                .map((v) => (
-                  <Marker key={v.id} position={[v.netLat, v.netLng]} icon={createEmergencyVehicleIcon(v)}>
-                    <Popup>
-                      <div>
-                        <div><strong>🚨 Emergency Vehicle {v.id}</strong></div>
-                        <div>Type: {v.type.replace('_', ' ').toUpperCase()}</div>
-                        {typeof v.speed === "number" && <div>Speed: {v.speed.toFixed(1)} m/s</div>}
-                        <div style={{ color: '#E53935', fontWeight: 'bold', marginTop: '8px' }}>PRIORITY VEHICLE</div>
-                      </div>
-                    </Popup>
-                  </Marker>
-                ))}
+            {/* Emergency vehicles only - show only if they actually exist in the simulation data */}
+            {Array.isArray(mapData?.vehicles) && mapData.vehicles
+              .filter((v) => {
+                const isEmergency = v.type === "ambulance" || v.type === "fire_truck" || v.type === "police";
+                const hasValidCoords = typeof v.netLat === "number" && typeof v.netLng === "number";
+                return isEmergency && hasValidCoords;
+              })
+              .map((v) => (
+                <Marker key={v.id} position={[v.netLat, v.netLng]} icon={createEmergencyVehicleIcon(v)}>
+                  <Popup>
+                    <div>
+                      <div><strong>🚨 Emergency Vehicle {v.id}</strong></div>
+                      <div>Type: {v.type.replace('_', ' ').toUpperCase()}</div>
+                      {typeof v.speed === "number" && <div>Speed: {v.speed.toFixed(1)} m/s</div>}
+                      <div>Edge: {v.edgeId || v.laneId || 'Unknown'}</div>
+                      <div>Coordinates: [{v.netLat?.toFixed(2)}, {v.netLng?.toFixed(2)}]</div>
+                      <div style={{ color: '#E53935', fontWeight: 'bold', marginTop: '8px' }}>PRIORITY VEHICLE</div>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
           </MapContainer>
         </div>
       </div>
@@ -1128,7 +1261,7 @@ const TrafficMap = () => {
               <div className="stat-item">
                 <span className="stat-label">With Traffic Data:</span>
                 <span className="stat-value" style={{ color: "#1976D2" }}>
-                  {Object.keys(edgeCongestion).length}
+                  {edgeCongestion?.size || 0}
                 </span>
               </div>
               <div className="stat-item">
@@ -1146,7 +1279,7 @@ const TrafficMap = () => {
               <div className="stat-item">
                 <span className="stat-label">Traffic Lights:</span>
                 <span className="stat-value" style={{ color: "#9C27B0" }}>
-                  {Array.isArray(mapData.tls) ? mapData.tls.length : 0}
+                  {Array.isArray(mapData?.tls) ? mapData.tls.length : 0}
                 </span>
               </div>
             </div>
