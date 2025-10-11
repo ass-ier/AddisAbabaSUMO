@@ -126,6 +126,111 @@ const createVehicleIcon = (vehicle) => {
   });
 };
 
+// Create emergency vehicle icon with distinctive styling and emergency flashers
+const createEmergencyVehicleIcon = (vehicle) => {
+  const { type = "ambulance", angle = 0 } = vehicle || {};
+  const rotation = typeof angle === "number" ? angle : 0;
+  
+  const getEmergencyConfig = () => {
+    switch(type) {
+      case 'ambulance':
+        return {
+          color: '#FFFFFF',
+          accent: '#E53935',
+          symbol: '🚑',
+          label: 'AMB'
+        };
+      case 'fire_truck':
+        return {
+          color: '#B71C1C',
+          accent: '#FFEB3B',
+          symbol: '🚒',
+          label: 'FIRE'
+        };
+      case 'police':
+        return {
+          color: '#1565C0',
+          accent: '#FFFFFF',
+          symbol: '🚓',
+          label: 'POL'
+        };
+      default:
+        return {
+          color: '#E53935',
+          accent: '#FFFFFF',
+          symbol: '🚨',
+          label: 'EMR'
+        };
+    }
+  };
+  
+  const config = getEmergencyConfig();
+  
+  const svg = `
+    <svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" class="emergency-vehicle-icon">
+      <defs>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+          <feMerge> 
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/> 
+          </feMerge>
+        </filter>
+        <style>
+          .flasher { 
+            animation: emergency-flash 1s infinite alternate;
+          }
+          @keyframes emergency-flash {
+            0% { opacity: 0.3; }
+            100% { opacity: 1; }
+          }
+        </style>
+      </defs>
+      
+      <g transform="translate(24,24) rotate(${rotation}) translate(-24,-24)">
+        <!-- Vehicle shadow -->
+        <ellipse cx="24" cy="26" rx="18" ry="8" fill="rgba(0,0,0,0.2)" />
+        
+        <!-- Main vehicle body -->
+        <rect x="14" y="8" width="20" height="32" rx="4" ry="4" 
+              fill="${config.color}" stroke="#333" stroke-width="2" filter="url(#glow)"/>
+        
+        <!-- Emergency light bars (flashing) -->
+        <rect x="12" y="6" width="24" height="4" rx="2" ry="2" 
+              fill="${config.accent}" class="flasher" opacity="0.8"/>
+        <rect x="12" y="38" width="24" height="4" rx="2" ry="2" 
+              fill="${config.accent}" class="flasher" opacity="0.8"/>
+        
+        <!-- Side emergency lights -->
+        <circle cx="12" cy="18" r="3" fill="${config.accent}" class="flasher" opacity="0.9"/>
+        <circle cx="36" cy="18" r="3" fill="${config.accent}" class="flasher" opacity="0.9"/>
+        <circle cx="12" cy="30" r="3" fill="${config.accent}" class="flasher" opacity="0.9"/>
+        <circle cx="36" cy="30" r="3" fill="${config.accent}" class="flasher" opacity="0.9"/>
+        
+        <!-- Vehicle details -->
+        <rect x="16" y="12" width="16" height="8" rx="2" fill="rgba(255,255,255,0.8)" />
+        <text x="24" y="18" text-anchor="middle" font-family="Arial, sans-serif" 
+              font-size="8" font-weight="bold" fill="#333">${config.label}</text>
+        
+        <!-- Direction indicator -->
+        <polygon points="24,4 20,10 28,10" fill="#333" opacity="0.7"/>
+        
+        <!-- Priority symbol -->
+        <circle cx="39" cy="9" r="6" fill="#E53935" stroke="#FFF" stroke-width="1"/>
+        <text x="39" y="13" text-anchor="middle" font-family="Arial, sans-serif" 
+              font-size="8" font-weight="bold" fill="#FFF">!</text>
+      </g>
+    </svg>
+  `;
+
+  return L.divIcon({
+    className: "emergency-vehicle-icon",
+    html: svg,
+    iconSize: [48, 48],
+    iconAnchor: [24, 24],
+  });
+};
+
 
 
 // Fit helper for SUMO bounds (guarded to avoid repeated fits/loops)
@@ -248,20 +353,33 @@ const TrafficMap = () => {
     return batches;
   }, [sumoNetData.lanes]);
 
-  // Live congestion map per edge from vehicles (avg speed vs limit)
-  const [edgeCongestion, setEdgeCongestion] = useState({});
+  // Live congestion map per edge from vehicle count
+  const [edgeCongestion, setEdgeCongestion] = useState({}); // Now stores vehicle count per edge
 
-  // Batch congestion overlay into 3 MultiPolylines (green/orange/red) to avoid thousands of components
+  // Enhanced congestion overlay - classify roads by vehicle count (green = light traffic, yellow = moderate, red = heavy)
   const congestedClasses = useMemo(() => {
-    const classes = { green: [], orange: [], red: [] };
+    const classes = { green: [], yellow: [], red: [], default: [] };
+    
     for (const e of edgeGeoms) {
-      const avgSpeed = edgeCongestion[e.id];
-      if (typeof avgSpeed !== 'number') continue;
-      const limit = e.speedLimit || 13.89;
-      const ratio = Math.max(0, Math.min(1, avgSpeed / Math.max(limit, 0.1)));
-      if (ratio >= 0.7) classes.green.push(e.points);
-      else if (ratio >= 0.4) classes.orange.push(e.points);
-      else classes.red.push(e.points);
+      const vehicleCount = edgeCongestion[e.id];
+      
+      // If no vehicles on this edge yet, show as default green (open road)
+      if (typeof vehicleCount !== 'number' || vehicleCount === 0) {
+        classes.default.push(e.points);
+        continue;
+      }
+      
+      // Vehicle count thresholds for congestion levels (adjusted for responsiveness):
+      // Green: 1-2 vehicles (light traffic)
+      // Yellow: 3-5 vehicles (moderate traffic)
+      // Red: 6+ vehicles (heavy traffic/congestion)
+      if (vehicleCount >= 6) {
+        classes.red.push(e.points);
+      } else if (vehicleCount >= 3) {
+        classes.yellow.push(e.points);
+      } else {
+        classes.green.push(e.points);
+      }
     }
     return classes;
   }, [edgeGeoms, edgeCongestion]);
@@ -457,21 +575,20 @@ const TrafficMap = () => {
               }));
             next.vehicles = vehicles;
 
-            // Update congestion map by averaging speeds per edgeId
-            const byEdge = new Map();
+            // Update congestion map by counting vehicles per edgeId
+            const vehicleCount = new Map();
             for (const v of vehicles) {
               const eid = v.edgeId;
-              if (!eid || typeof v.speed !== "number") continue;
-              const rec = byEdge.get(eid) || { sum: 0, count: 0 };
-              rec.sum += Math.max(v.speed, 0);
-              rec.count += 1;
-              byEdge.set(eid, rec);
+              if (!eid) continue;
+              const count = vehicleCount.get(eid) || 0;
+              vehicleCount.set(eid, count + 1);
             }
-            const agg = {};
-            for (const [eid, { sum, count }] of byEdge.entries()) {
-              agg[eid] = sum / Math.max(count, 1);
+            // Convert to plain object
+            const congestionData = {};
+            for (const [eid, count] of vehicleCount.entries()) {
+              congestionData[eid] = count;
             }
-            setEdgeCongestion(agg);
+            setEdgeCongestion(congestionData);
           }
           if (payload.tls) {
             // Keep TLS state by ID regardless of coordinates; include per-side summary and timing/program if provided
@@ -766,13 +883,25 @@ const TrafficMap = () => {
       {/* Quick Top Stats */}
       <div className="top-stats">
         <div className="kpi">
-          <span className="kpi-label">Total Intersections</span>
-          <span className="kpi-value">{mapData.intersections.length}</span>
+          <span className="kpi-label">Active Vehicles</span>
+          <span className="kpi-value">{Array.isArray(mapData.vehicles) ? mapData.vehicles.length : 0}</span>
         </div>
         <div className="kpi">
-          <span className="kpi-label">Congested</span>
-          <span className="kpi-value">
-            {mapData.intersections.filter((i) => i.status === "congested").length}
+          <span className="kpi-label">Emergency Units</span>
+          <span className="kpi-value" style={{ color: "#E53935" }}>
+            {Array.isArray(mapData.vehicles) ? mapData.vehicles.filter(v => v.type === 'ambulance' || v.type === 'fire_truck' || v.type === 'police').length : 0}
+          </span>
+        </div>
+        <div className="kpi">
+          <span className="kpi-label">Traffic Status</span>
+          <span className="kpi-value" style={{ 
+            color: Object.keys(edgeCongestion).length > 0 ? 
+              (congestedClasses.red.length > 0 ? '#F44336' : congestedClasses.yellow.length > 0 ? '#FFC107' : '#4CAF50') : 
+              '#4CAF50'
+          }}>
+            {Object.keys(edgeCongestion).length === 0 ? 'All Clear' : 
+             congestedClasses.red.length > 0 ? 'Congested' : 
+             congestedClasses.yellow.length > 0 ? 'Moderate' : 'Free Flow'}
           </span>
         </div>
       </div>
@@ -844,15 +973,22 @@ const TrafficMap = () => {
               />
             ))}
 
-            {/* Optional: overlay dynamic congestion color atop base edges (batched) */}
+            {/* Traffic density overlay - color roads based on vehicle count */}
+            {/* Default: No vehicles yet - show as light green (open roads) */}
+            {congestedClasses.default.length > 0 && (
+              <Polyline positions={congestedClasses.default} color="#4CAF50" weight={6} opacity={0.7} lineCap="round" lineJoin="round" />
+            )}
+            {/* Green: Light traffic (1-2 vehicles per road segment) */}
             {congestedClasses.green.length > 0 && (
-              <Polyline positions={congestedClasses.green} color="#25A244" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
+              <Polyline positions={congestedClasses.green} color="#4CAF50" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
             )}
-            {congestedClasses.orange.length > 0 && (
-              <Polyline positions={congestedClasses.orange} color="#FB8C00" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
+            {/* Yellow: Moderate traffic (3-5 vehicles per road segment) */}
+            {congestedClasses.yellow.length > 0 && (
+              <Polyline positions={congestedClasses.yellow} color="#FFC107" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
             )}
+            {/* Red: Heavy traffic (6+ vehicles per road segment) */}
             {congestedClasses.red.length > 0 && (
-              <Polyline positions={congestedClasses.red} color="#D7263D" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
+              <Polyline positions={congestedClasses.red} color="#F44336" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
             )}
 
             {/* TLS from .net.xml positions with live phase state from simulation */}
@@ -955,17 +1091,22 @@ const TrafficMap = () => {
               });
             })()}
 
-            {/* Live vehicles from SUMO on CRS.Simple (use net coords y,x) */}
+            {/* Emergency vehicles only - special icons for emergency vehicles */}
             {Array.isArray(mapData.vehicles) &&
               mapData.vehicles
-                .filter((v) => typeof v.netLat === "number" && typeof v.netLng === "number")
+                .filter((v) => 
+                  typeof v.netLat === "number" && 
+                  typeof v.netLng === "number" &&
+                  (v.type === "ambulance" || v.type === "fire_truck" || v.type === "police")
+                )
                 .map((v) => (
-                  <Marker key={v.id} position={[v.netLat, v.netLng]} icon={createVehicleIcon(v)}>
+                  <Marker key={v.id} position={[v.netLat, v.netLng]} icon={createEmergencyVehicleIcon(v)}>
                     <Popup>
                       <div>
-                        <div><strong>Vehicle {v.id}</strong></div>
+                        <div><strong>🚨 Emergency Vehicle {v.id}</strong></div>
+                        <div>Type: {v.type.replace('_', ' ').toUpperCase()}</div>
                         {typeof v.speed === "number" && <div>Speed: {v.speed.toFixed(1)} m/s</div>}
-                        {typeof v.type === "string" && <div>Type: {v.type}</div>}
+                        <div style={{ color: '#E53935', fontWeight: 'bold', marginTop: '8px' }}>PRIORITY VEHICLE</div>
                       </div>
                     </Popup>
                   </Marker>
@@ -979,42 +1120,73 @@ const TrafficMap = () => {
         <div className="card shadow-card" style={{ padding: 12 }}>
           <div className="summary-stats">
               <div className="stat-item">
-                <span className="stat-label">Total Intersections:</span>
+                <span className="stat-label">Road Segments:</span>
                 <span className="stat-value">
-                  {mapData.intersections.length}
+                  {edgeGeoms.length}
+                </span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-label">With Traffic Data:</span>
+                <span className="stat-value" style={{ color: "#1976D2" }}>
+                  {Object.keys(edgeCongestion).length}
+                </span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-label">Free Flowing:</span>
+                <span className="stat-value" style={{ color: "#4CAF50" }}>
+                  {congestedClasses.green.length + congestedClasses.default.length}
                 </span>
               </div>
               <div className="stat-item">
                 <span className="stat-label">Congested:</span>
                 <span className="stat-value" style={{ color: "#F44336" }}>
-                  {
-                    mapData.intersections.filter((i) => i.status === "congested").length
-                  }
+                  {congestedClasses.red.length}
                 </span>
               </div>
               <div className="stat-item">
-                <span className="stat-label">Emergency:</span>
+                <span className="stat-label">Traffic Lights:</span>
                 <span className="stat-value" style={{ color: "#9C27B0" }}>
-                  {mapData.emergencyVehicles.length}
+                  {Array.isArray(mapData.tls) ? mapData.tls.length : 0}
                 </span>
               </div>
             </div>
             <div className="legend" style={{ marginTop: 12 }}>
-              <div className="legend-item">
-                <div className="legend-color" style={{ background: "#4CAF50" }}></div>
-                <span>Normal Traffic</span>
+              <div style={{ fontWeight: 'bold', marginBottom: 8, color: '#333' }}>Traffic Density Legend</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
+                <div className="legend-item">
+                  <div className="legend-color" style={{ background: "#4CAF50", width: '20px', height: '4px', borderRadius: '2px', opacity: '0.7' }}></div>
+                  <span>Open Roads (No vehicles)</span>
+                </div>
+                <div className="legend-item">
+                  <div className="legend-color" style={{ background: "#4CAF50", width: '20px', height: '4px', borderRadius: '2px' }}></div>
+                  <span>Light Traffic (1-2 vehicles)</span>
+                </div>
+                <div className="legend-item">
+                  <div className="legend-color" style={{ background: "#FFC107", width: '20px', height: '4px', borderRadius: '2px' }}></div>
+                  <span>Moderate Traffic (3-5 vehicles)</span>
+                </div>
+                <div className="legend-item">
+                  <div className="legend-color" style={{ background: "#F44336", width: '20px', height: '4px', borderRadius: '2px' }}></div>
+                  <span>Heavy Traffic (6+ vehicles)</span>
+                </div>
               </div>
-              <div className="legend-item">
-                <div className="legend-color" style={{ background: "#FF9800" }}></div>
-                <span>Congested</span>
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '8px', fontStyle: 'italic' }}>
+                * Colors change based on real-time vehicle count per road segment
               </div>
-              <div className="legend-item">
-                <div className="legend-color" style={{ background: "#F44336" }}></div>
-                <span>Critical</span>
-              </div>
-              <div className="legend-item">
-                <div className="legend-color" style={{ background: "#9C27B0" }}></div>
-                <span>Emergency</span>
+              <div style={{ fontWeight: 'bold', marginTop: 16, marginBottom: 8, color: '#333' }}>Emergency Vehicles</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
+                <div className="legend-item" style={{ alignItems: 'center' }}>
+                  <div style={{ width: '24px', height: '24px', background: '#FFFFFF', border: '2px solid #E53935', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>AMB</div>
+                  <span>Ambulance</span>
+                </div>
+                <div className="legend-item" style={{ alignItems: 'center' }}>
+                  <div style={{ width: '24px', height: '24px', background: '#B71C1C', border: '2px solid #FFEB3B', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold', color: 'white' }}>FIRE</div>
+                  <span>Fire Truck</span>
+                </div>
+                <div className="legend-item" style={{ alignItems: 'center' }}>
+                  <div style={{ width: '24px', height: '24px', background: '#1565C0', border: '2px solid #FFFFFF', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold', color: 'white' }}>POL</div>
+                  <span>Police</span>
+                </div>
               </div>
             </div>
           </div>

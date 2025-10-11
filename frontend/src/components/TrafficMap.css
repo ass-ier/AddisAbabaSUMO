@@ -149,6 +149,51 @@
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.25));
 }
 
+/* Emergency Vehicle Icons */
+.emergency-vehicle-icon {
+  background: transparent !important;
+  border: none !important;
+  transform: translate3d(0, 0, 0);
+  z-index: 1000;
+}
+
+/* Emergency vehicle flashing animation */
+@keyframes emergency-flash {
+  0% { opacity: 0.3; }
+  50% { opacity: 1; }
+  100% { opacity: 0.3; }
+}
+
+.emergency-vehicle-icon .flasher {
+  animation: emergency-flash 0.8s ease-in-out infinite;
+}
+
+/* Emergency vehicle priority pulse */
+@keyframes priority-pulse {
+  0% { 
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.7);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 4px rgba(229, 57, 53, 0.3);
+  }
+  100% { 
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(229, 57, 53, 0);
+  }
+}
+
+.emergency-vehicle-icon {
+  animation: priority-pulse 2s ease-in-out infinite;
+}
+
+/* Emergency vehicle hover effect */
+.emergency-vehicle-icon:hover {
+  transform: scale(1.1) translate3d(0, 0, 0);
+  transition: transform 0.2s ease;
+}
+
 /* Traffic signal animations */
 .traffic-signal .light-active {
   transition: opacity 250ms ease, filter 250ms ease;
