@@ -40,13 +40,33 @@ const TrafficLightModal = ({
     if (isOpen && tlsId) {
       loadTlsConfigurations()
         .then(configs => {
+          console.log('TLS configs loaded:', configs);
           setTlsConfigs(configs);
           const phases = getAvailablePhases(tlsId, configs);
+          console.log('Available phases for', tlsId, ':', phases);
           setAvailablePhases(phases);
+          
+          // Clear any previous error if we successfully loaded configs
+          if (Object.keys(configs).length > 0) {
+            setError(null);
+          }
         })
         .catch(err => {
           console.error('Failed to load TLS configurations:', err);
-          setError('Failed to load traffic light configurations');
+          // Don't treat this as a fatal error - create fallback phases
+          setError('Configuration file not available - using basic controls only');
+          setTlsConfigs({});
+          
+          // Create basic fallback phases for testing
+          const fallbackPhases = [
+            { index: 0, state: 'GGGrrrr', duration: 45, description: 'Phase 1' },
+            { index: 1, state: 'yyyrrr', duration: 3, description: 'Transition 1' },
+            { index: 2, state: 'rrrGGG', duration: 30, description: 'Phase 2' },
+            { index: 3, state: 'rrryyy', duration: 3, description: 'Transition 2' }
+          ];
+          
+          console.log('Using fallback phases:', fallbackPhases);
+          setAvailablePhases(fallbackPhases);
         });
     }
   }, [isOpen, tlsId]);
@@ -60,15 +80,25 @@ const TrafficLightModal = ({
   
   // Handle phase change
   const handlePhaseChange = async (phaseIndex) => {
-    if (!canOverride || !isValidPhaseIndex(tlsId, phaseIndex, tlsConfigs)) {
+    if (!canOverride) {
+      console.warn('Phase change blocked: no override permission');
       return;
     }
     
+    // Allow basic validation even without loaded configs
+    const hasConfigs = Object.keys(tlsConfigs).length > 0;
+    if (hasConfigs && !isValidPhaseIndex(tlsId, phaseIndex, tlsConfigs)) {
+      console.warn('Phase change blocked: invalid phase index', { tlsId, phaseIndex, availablePhases });
+      return;
+    }
+    
+    console.log('Setting TLS phase:', { tlsId, phaseIndex });
     setLoading(true);
     setError(null);
     
     try {
-      await api.tlsSetPhase(tlsId, phaseIndex);
+      const response = await api.tlsSetPhase(tlsId, phaseIndex);
+      console.log('TLS phase set successfully:', response);
       setSelectedPhase(phaseIndex);
       
       // Show success notification
@@ -79,6 +109,7 @@ const TrafficLightModal = ({
         }
       }));
     } catch (err) {
+      console.error('TLS phase change failed:', err);
       setError(err.message || 'Failed to change phase');
       window.dispatchEvent(new CustomEvent('notify', {
         detail: { 
@@ -93,13 +124,18 @@ const TrafficLightModal = ({
   
   // Handle next/previous phase
   const handleNextPhase = async () => {
-    if (!canOverride) return;
+    if (!canOverride) {
+      console.warn('Next phase blocked: no override permission');
+      return;
+    }
     
+    console.log('Moving to next phase for TLS:', tlsId);
     setLoading(true);
     setError(null);
     
     try {
-      await api.tlsNextPhase(tlsId);
+      const response = await api.tlsNextPhase(tlsId);
+      console.log('Next phase success:', response);
       window.dispatchEvent(new CustomEvent('notify', {
         detail: { 
           type: 'success', 
@@ -107,6 +143,7 @@ const TrafficLightModal = ({
         }
       }));
     } catch (err) {
+      console.error('Next phase failed:', err);
       setError(err.message || 'Failed to move to next phase');
     } finally {
       setLoading(false);
@@ -114,13 +151,18 @@ const TrafficLightModal = ({
   };
   
   const handlePrevPhase = async () => {
-    if (!canOverride) return;
+    if (!canOverride) {
+      console.warn('Prev phase blocked: no override permission');
+      return;
+    }
     
+    console.log('Moving to previous phase for TLS:', tlsId);
     setLoading(true);
     setError(null);
     
     try {
-      await api.tlsPrevPhase(tlsId);
+      const response = await api.tlsPrevPhase(tlsId);
+      console.log('Previous phase success:', response);
       window.dispatchEvent(new CustomEvent('notify', {
         detail: { 
           type: 'success', 
@@ -128,6 +170,7 @@ const TrafficLightModal = ({
         }
       }));
     } catch (err) {
+      console.error('Previous phase failed:', err);
       setError(err.message || 'Failed to move to previous phase');
     } finally {
       setLoading(false);

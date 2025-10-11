@@ -62,6 +62,45 @@ def resolve_net_path_from_cfg(cfg_path):
         return None
 
 
+def build_tls_mapping(net_path):
+    """
+    Create a mapping from junction IDs (used by traci) to tlLogic IDs (user-friendly names).
+    Also create reverse mapping from tlLogic IDs to junction IDs.
+    """
+    try:
+        tree = ET.parse(net_path)
+        root = tree.getroot()
+        
+        # Map tlLogic ID -> junction ID and junction ID -> tlLogic ID
+        tllogic_to_junction = {}
+        junction_to_tllogic = {}
+        
+        # Find all connections with tl attribute to map tlLogic IDs to junction IDs
+        for connection in root.findall('connection'):
+            tl_attr = connection.get('tl')
+            via_attr = connection.get('via')
+            if tl_attr and via_attr:
+                # Extract junction ID from via (e.g. ":cluster_283262872_444451567_0_0" -> "cluster_283262872_444451567")
+                if via_attr.startswith(':'):
+                    junction_parts = via_attr[1:].split('_')
+                    # Reconstruct junction ID by removing the last connection-specific parts
+                    if len(junction_parts) >= 3:
+                        # For cluster junctions like "cluster_283262872_444451567_0_0"
+                        # We want "cluster_283262872_444451567"
+                        junction_id = '_'.join(junction_parts[:-2])
+                        tllogic_to_junction[tl_attr] = junction_id
+                        junction_to_tllogic[junction_id] = tl_attr
+        
+        print(json.dumps({"type": "log", "level": "info", "message": f"Built TLS mapping: {len(tllogic_to_junction)} traffic lights mapped"}))
+        sys.stdout.flush()
+        
+        return tllogic_to_junction, junction_to_tllogic
+    except Exception as e:
+        print(json.dumps({"type": "log", "level": "error", "message": f"Failed to build TLS mapping: {e}"}))
+        sys.stdout.flush()
+        return {}, {}
+
+
 def build_network_payload(net_path):
     try:
         net = readNet(net_path)
@@ -88,6 +127,13 @@ def build_network_payload(net_path):
 
 def main():
     args = parse_args()
+    
+    # Build TLS ID mapping from network file
+    net_path = resolve_net_path_from_cfg(args.sumo_cfg)
+    tllogic_to_junction = {}
+    junction_to_tllogic = {}
+    if net_path:
+        tllogic_to_junction, junction_to_tllogic = build_tls_mapping(net_path)
 
     # Set up stdin command queue (non-blocking via thread)
     cmd_queue = queue.Queue()
@@ -111,23 +157,165 @@ def main():
     reader_thread = threading.Thread(target=stdin_reader, args=(cmd_queue,), daemon=True)
     reader_thread.start()
 
-    def handle_command(cmd: dict):
+    def handle_command(cmd: dict, tllogic_to_junction_map: dict = None):
+        nonlocal tllogic_to_junction  # Access the mapping from outer scope
+        if tllogic_to_junction_map:
+            tllogic_to_junction = tllogic_to_junction_map
         try:
+            # Helper to emit an immediate small viz payload for a single TLS
+            def emit_tls_update(junction_id):
+                try:
+                    display_id = junction_to_tllogic.get(junction_id, junction_id)
+                    state = traci.trafficlight.getRedYellowGreenState(junction_id)
+                    tls_obj = { 'id': display_id, 'state': state }
+                    try:
+                        sim_t = float(traci.simulation.getTime())
+                        cur_idx = int(traci.trafficlight.getPhase(junction_id))
+                        num_phases = int(traci.trafficlight.getPhaseNumber(junction_id))
+                        next_sw = float(traci.trafficlight.getNextSwitch(junction_id))
+                        remaining = max(0.0, next_sw - sim_t)
+                        nxt_idx = (cur_idx + 1) % max(1, num_phases)
+                        tls_obj['timing'] = {
+                            'currentIndex': cur_idx,
+                            'numPhases': num_phases,
+                            'remaining': remaining,
+                            'nextIndex': nxt_idx,
+                            'nextSwitch': next_sw,
+                            'simTime': sim_t
+                        }
+                    except Exception:
+                        pass
+                    # Print a minimal viz payload so the server will forward it
+                    payload = {
+                        'type': 'viz',
+                        'step': -1,
+                        'ts': int(time.time() * 1000),
+                        'vehicles': [],
+                        'tls': [tls_obj]
+                    }
+                    print(json.dumps(payload))
+                    sys.stdout.flush()
+                except Exception:
+                    # best-effort only
+                    pass
+
+            print(json.dumps({"type": "log", "level": "info", "message": f"🚦 RECEIVED TLS COMMAND: {cmd}"}))
+            sys.stdout.flush()
+            
             if not isinstance(cmd, dict):
+                print(json.dumps({"type": "log", "level": "warn", "message": f"Command is not dict: {type(cmd)}"}))
+                sys.stdout.flush()
                 return
-            if cmd.get('type') != 'tls':
+                
+            cmd_type = cmd.get('type')
+            if cmd_type not in ['tls', 'tls_state']:
+                print(json.dumps({"type": "log", "level": "debug", "message": f"Command type is not supported: {cmd_type}"}))
+                sys.stdout.flush()
                 return
-            tls_id = cmd.get('id')
-            if not tls_id:
+                
+            tls_id_input = cmd.get('id')
+            if not tls_id_input:
+                print(json.dumps({"type": "log", "level": "warn", "message": "No TLS ID provided"}))
+                sys.stdout.flush()
                 return
+                
             action = cmd.get('cmd')
+            print(json.dumps({"type": "log", "level": "info", "message": f"Processing TLS command - Input ID: {tls_id_input}, Action: {action}"}))
+            sys.stdout.flush()
+            
+            # Use the TLS ID directly (mapping is now handled by backend)
+            tls_id = tls_id_input
+            print(json.dumps({"type": "log", "level": "info", "message": f"Using TLS ID: '{tls_id}' (backend handles friendly name mapping)"}))
+            sys.stdout.flush()
+            
+            # Check if TLS exists - IMMEDIATE EXECUTION
+            try:
+                all_tls = traci.trafficlight.getIDList()
+                print(json.dumps({"type": "log", "level": "info", "message": f"🔍 CHECKING TLS: {tls_id} in {len(all_tls)} available TLS"}))
+                sys.stdout.flush()
+                
+                if tls_id not in all_tls:
+                    print(json.dumps({"type": "log", "level": "error", "message": f"❌ TLS '{tls_id}' NOT FOUND! Available: {list(all_tls)[:5]}..."}))
+                    sys.stdout.flush()
+                    return
+                    
+                current_phase = traci.trafficlight.getPhase(tls_id)
+                current_state = traci.trafficlight.getRedYellowGreenState(tls_id)
+                print(json.dumps({"type": "log", "level": "info", "message": f"✅ TLS '{tls_id}' FOUND! Current phase: {current_phase}, state: {current_state}"}))
+                sys.stdout.flush()
+            except Exception as e:
+                print(json.dumps({"type": "log", "level": "error", "message": f"💥 FAILED TO CHECK TLS: {e}"}))
+                sys.stdout.flush()
+                return
+            
+            # Handle direct state setting - FORCE IMMEDIATE EXECUTION
+            if cmd_type == 'tls_state':
+                try:
+                    desired_phase = cmd.get('phase')
+                    if not desired_phase:
+                        print(json.dumps({"type": "log", "level": "error", "message": "❌ NO PHASE STATE PROVIDED!"}))
+                        sys.stdout.flush()
+                        return
+                    
+                    current_state = traci.trafficlight.getRedYellowGreenState(tls_id)
+                    print(json.dumps({"type": "log", "level": "info", "message": f"🎯 SETTING TLS {tls_id}: '{current_state}' → '{desired_phase}'"}))
+                    sys.stdout.flush()
+                    
+                    # FORCE STATE CHANGE
+                    traci.trafficlight.setRedYellowGreenState(tls_id, desired_phase)
+                    print(json.dumps({"type": "log", "level": "info", "message": f"🔄 STATE SET COMMAND EXECUTED!"}))
+                    sys.stdout.flush()
+                    
+                    # FORCE SIMULATION STEP
+                    traci.simulationStep()
+                    print(json.dumps({"type": "log", "level": "info", "message": f"⏩ SIMULATION STEP FORCED!"}))
+                    sys.stdout.flush()
+                    
+                    # VERIFY CHANGE
+                    new_state = traci.trafficlight.getRedYellowGreenState(tls_id)
+                    print(json.dumps({"type": "log", "level": "info", "message": f"✅ TLS {tls_id} STATE CHANGED: '{new_state}'"}))
+                    sys.stdout.flush()
+                    # Emit an immediate TLS update so clients see the change without waiting for next loop
+                    try:
+                        emit_tls_update(tls_id)
+                    except Exception:
+                        pass
+                    return
+                except Exception as e:
+                    print(json.dumps({"type": "log", "level": "error", "message": f"💥 TLS STATE SETTING FAILED: {e}"}))
+                    print(json.dumps({"type": "log", "level": "error", "message": f"Stack: {str(e.__traceback__)}"})) 
+                    sys.stdout.flush()
+                    return
+                
             if action == 'next':
                 try:
                     cur = traci.trafficlight.getPhase(tls_id)
                     num = traci.trafficlight.getPhaseNumber(tls_id)
-                    traci.trafficlight.setPhase(tls_id, (cur + 1) % max(1, num))
-                    print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: next phase"}))
+                    new_phase = (cur + 1) % max(1, num)
+                    
+                    # Read the nominal duration from the traffic light program
+                    program = traci.trafficlight.getCompleteRedYellowGreenDefinition(tls_id)
+                    if program and len(program) > 0 and len(program[0].phases) > new_phase:
+                        nominal_duration = program[0].phases[new_phase].duration
+                    else:
+                        nominal_duration = 30  # fallback duration
+                    
+                    # Jump to the phase
+                    traci.trafficlight.setPhase(tls_id, new_phase)
+                    
+                    # Set the phase duration
+                    traci.trafficlight.setPhaseDuration(tls_id, nominal_duration)
+                    
+                    # Advance simulation one step for immediate GUI update
+                    traci.simulationStep()
+                    
+                    print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: changed from phase {cur} to {new_phase} with duration {nominal_duration}s"}))
                     sys.stdout.flush()
+                    # Emit immediate TLS update
+                    try:
+                        emit_tls_update(tls_id)
+                    except Exception:
+                        pass
                 except Exception as e:
                     print(json.dumps({"type": "log", "level": "error", "message": f"TLS {tls_id}: next failed: {e}"}))
                     sys.stdout.flush()
@@ -135,28 +323,78 @@ def main():
                 try:
                     cur = traci.trafficlight.getPhase(tls_id)
                     num = traci.trafficlight.getPhaseNumber(tls_id)
-                    traci.trafficlight.setPhase(tls_id, (cur - 1 + max(1, num)) % max(1, num))
-                    print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: previous phase"}))
+                    new_phase = (cur - 1 + max(1, num)) % max(1, num)
+                    
+                    # Read the nominal duration from the traffic light program
+                    program = traci.trafficlight.getCompleteRedYellowGreenDefinition(tls_id)
+                    if program and len(program) > 0 and len(program[0].phases) > new_phase:
+                        nominal_duration = program[0].phases[new_phase].duration
+                    else:
+                        nominal_duration = 30  # fallback duration
+                    
+                    # Jump to the phase
+                    traci.trafficlight.setPhase(tls_id, new_phase)
+                    
+                    # Set the phase duration
+                    traci.trafficlight.setPhaseDuration(tls_id, nominal_duration)
+                    
+                    # Advance simulation one step for immediate GUI update
+                    traci.simulationStep()
+                    
+                    print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: changed from phase {cur} to {new_phase} with duration {nominal_duration}s"}))
                     sys.stdout.flush()
+                    # Emit immediate TLS update
+                    try:
+                        emit_tls_update(tls_id)
+                    except Exception:
+                        pass
                 except Exception as e:
                     print(json.dumps({"type": "log", "level": "error", "message": f"TLS {tls_id}: prev failed: {e}"}))
                     sys.stdout.flush()
             elif action == 'set':
                 try:
                     idx = int(cmd.get('phaseIndex'))
+                    cur = traci.trafficlight.getPhase(tls_id)
                     num = traci.trafficlight.getPhaseNumber(tls_id)
+                    print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: attempting to set phase {idx} (current: {cur}, max: {num-1})"}))
+                    sys.stdout.flush()
+                    
                     if 0 <= idx < max(1, num):
+                        # Read the nominal duration from the traffic light program
+                        program = traci.trafficlight.getCompleteRedYellowGreenDefinition(tls_id)
+                        if program and len(program) > 0 and len(program[0].phases) > idx:
+                            nominal_duration = program[0].phases[idx].duration
+                        else:
+                            nominal_duration = 30  # fallback duration
+                        
+                        # Jump to the phase
                         traci.trafficlight.setPhase(tls_id, idx)
-                        print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: set phase {idx}"}))
+                        
+                        # Set the phase duration
+                        traci.trafficlight.setPhaseDuration(tls_id, nominal_duration)
+                        
+                        # Advance simulation one step for immediate GUI update
+                        traci.simulationStep()
+                        
+                        print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: successfully changed from phase {cur} to {idx} with duration {nominal_duration}s"}))
                         sys.stdout.flush()
+                        # Emit immediate TLS update
+                        try:
+                            emit_tls_update(tls_id)
+                        except Exception:
+                            pass
                     else:
-                        print(json.dumps({"type": "log", "level": "warn", "message": f"TLS {tls_id}: invalid phase index {idx}"}))
+                        print(json.dumps({"type": "log", "level": "warn", "message": f"TLS {tls_id}: invalid phase index {idx} (valid range: 0-{num-1})"}))
                         sys.stdout.flush()
                 except Exception as e:
                     print(json.dumps({"type": "log", "level": "error", "message": f"TLS {tls_id}: set failed: {e}"}))
                     sys.stdout.flush()
-        except Exception:
-            pass
+            else:
+                print(json.dumps({"type": "log", "level": "warn", "message": f"Unknown TLS action: {action}"}))
+                sys.stdout.flush()
+        except Exception as e:
+            print(json.dumps({"type": "log", "level": "error", "message": f"handle_command failed: {e}"}))
+            sys.stdout.flush()
 
     # RL mode: run targeted env with PPO model controlling traffic lights
     if args.rl_model:
@@ -243,15 +481,21 @@ def main():
                 # Collect TLS states
                 tls_states = []
                 try:
-                    for tls_id in traci.trafficlight.getIDList():
-                        state = traci.trafficlight.getRedYellowGreenState(tls_id)
-                        tls_obj = {'id': tls_id, 'state': state}
+                    for junction_id in traci.trafficlight.getIDList():
+                        state = traci.trafficlight.getRedYellowGreenState(junction_id)
+                        # Use friendly tlLogic ID if available, otherwise use junction ID
+                        display_id = junction_to_tllogic.get(junction_id, junction_id)
+                        tls_obj = {'id': display_id, 'state': state}
+                        
+                        # Store the junction_id for internal use if needed
+                        if display_id != junction_id:
+                            tls_obj['junction_id'] = junction_id
                         # Timing info
                         try:
                             sim_t = float(traci.simulation.getTime())
-                            cur_idx = int(traci.trafficlight.getPhase(tls_id))
-                            num_phases = int(traci.trafficlight.getPhaseNumber(tls_id))
-                            next_sw = float(traci.trafficlight.getNextSwitch(tls_id))
+                            cur_idx = int(traci.trafficlight.getPhase(junction_id))
+                            num_phases = int(traci.trafficlight.getPhaseNumber(junction_id))
+                            next_sw = float(traci.trafficlight.getNextSwitch(junction_id))
                             remaining = max(0.0, next_sw - sim_t)
                             nxt_idx = (cur_idx + 1) % max(1, num_phases)
                             tls_obj['timing'] = {
@@ -266,10 +510,10 @@ def main():
                             pass
                         # Program definition
                         try:
-                            prog_id = traci.trafficlight.getProgram(tls_id)
+                            prog_id = traci.trafficlight.getProgram(junction_id)
                             phases_info = []
                             try:
-                                defs = traci.trafficlight.getCompleteRedYellowGreenDefinition(tls_id)
+                                defs = traci.trafficlight.getCompleteRedYellowGreenDefinition(junction_id)
                                 chosen = None
                                 for lg in defs:
                                     pid = getattr(lg, 'programID', getattr(lg, 'programID', None))
@@ -295,7 +539,7 @@ def main():
                         # Approximate TLS center from controlled lanes
                         x_c = None; y_c = None
                         try:
-                            controlled_lanes = traci.trafficlight.getControlledLanes(tls_id)
+                            controlled_lanes = traci.trafficlight.getControlledLanes(junction_id)
                             xs, ys, count = 0.0, 0.0, 0
                             for ln in controlled_lanes:
                                 try:
@@ -320,7 +564,7 @@ def main():
                             pass
                         # Derive per-side (N,E,S,W) summary from controlled links ordering and current state
                         try:
-                            links = traci.trafficlight.getControlledLinks(tls_id)
+                            links = traci.trafficlight.getControlledLinks(junction_id)
                             # links is list aligned with state entries
                             sides = {'N': 'r', 'E': 'r', 'S': 'r', 'W': 'r'}
                             lane_states = {}
@@ -443,7 +687,7 @@ def main():
                 try:
                     while True:
                         cmd = cmd_queue.get_nowait()
-                        handle_command(cmd)
+                        handle_command(cmd, tllogic_to_junction)
                 except Exception:
                     pass
 
@@ -548,15 +792,21 @@ def main():
             # Traffic light states with approximate geometry and per-side summary
             tls_states = []
             try:
-                for tls_id in traci.trafficlight.getIDList():
-                    state = traci.trafficlight.getRedYellowGreenState(tls_id)
-                    tls_obj = {'id': tls_id, 'state': state}
+                for junction_id in traci.trafficlight.getIDList():
+                    state = traci.trafficlight.getRedYellowGreenState(junction_id)
+                    # Use friendly tlLogic ID if available, otherwise use junction ID
+                    display_id = junction_to_tllogic.get(junction_id, junction_id)
+                    tls_obj = {'id': display_id, 'state': state}
+                    
+                    # Store the junction_id for internal use if needed
+                    if display_id != junction_id:
+                        tls_obj['junction_id'] = junction_id
                     # Timing info
                     try:
                         sim_t = float(traci.simulation.getTime())
-                        cur_idx = int(traci.trafficlight.getPhase(tls_id))
-                        num_phases = int(traci.trafficlight.getPhaseNumber(tls_id))
-                        next_sw = float(traci.trafficlight.getNextSwitch(tls_id))
+                        cur_idx = int(traci.trafficlight.getPhase(junction_id))
+                        num_phases = int(traci.trafficlight.getPhaseNumber(junction_id))
+                        next_sw = float(traci.trafficlight.getNextSwitch(junction_id))
                         remaining = max(0.0, next_sw - sim_t)
                         nxt_idx = (cur_idx + 1) % max(1, num_phases)
                         tls_obj['timing'] = {
@@ -571,10 +821,10 @@ def main():
                         pass
                     # Program definition
                     try:
-                        prog_id = traci.trafficlight.getProgram(tls_id)
+                        prog_id = traci.trafficlight.getProgram(junction_id)
                         phases_info = []
                         try:
-                            defs = traci.trafficlight.getCompleteRedYellowGreenDefinition(tls_id)
+                            defs = traci.trafficlight.getCompleteRedYellowGreenDefinition(junction_id)
                             chosen = None
                             for lg in defs:
                                 pid = getattr(lg, 'programID', getattr(lg, 'programID', None))
@@ -600,7 +850,7 @@ def main():
                     # Approximate TLS center from controlled lanes
                     x_c = None; y_c = None
                     try:
-                        controlled_lanes = traci.trafficlight.getControlledLanes(tls_id)
+                        controlled_lanes = traci.trafficlight.getControlledLanes(junction_id)
                         xs, ys, count = 0.0, 0.0, 0
                         for ln in controlled_lanes:
                             try:
@@ -629,7 +879,7 @@ def main():
                         pass
                     # Per-side summary
                     try:
-                        links = traci.trafficlight.getControlledLinks(tls_id)
+                        links = traci.trafficlight.getControlledLinks(junction_id)
                         sides = {'N': 'r', 'E': 'r', 'S': 'r', 'W': 'r'}
                         lane_states = {}
                         lane_angles = {}
@@ -753,9 +1003,15 @@ def main():
             try:
                 while True:
                     cmd = cmd_queue.get_nowait()
-                    handle_command(cmd)
-            except Exception:
+                    print(json.dumps({"type": "log", "level": "info", "message": f"Processing command: {cmd}"}))
+                    sys.stdout.flush()
+                    handle_command(cmd, tllogic_to_junction)
+            except queue.Empty:
+                # No more commands to process, this is normal
                 pass
+            except Exception as e:
+                print(json.dumps({"type": "log", "level": "error", "message": f"Command processing error: {e}"}))
+                sys.stdout.flush()
 
     except KeyboardInterrupt:
         pass

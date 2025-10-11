@@ -182,6 +182,35 @@ const AuditLog = mongoose.model("AuditLog", auditLogSchema);
 const Emergency = mongoose.model("Emergency", emergencySchema);
 let sumoBridgeProcess = null;
 
+// TLS mapping configuration
+let tlsMapping = {};
+function loadTlsMapping() {
+  try {
+    const fs = require('fs');
+    const tlsMappingPath = path.join(__dirname, 'tls-mapping.json');
+    if (fs.existsSync(tlsMappingPath)) {
+      const data = fs.readFileSync(tlsMappingPath, 'utf8');
+      tlsMapping = JSON.parse(data);
+      console.log('TLS mapping loaded with', Object.keys(tlsMapping.mappings || {}).length, 'friendly names');
+    } else {
+      console.warn('TLS mapping file not found:', tlsMappingPath);
+    }
+  } catch (error) {
+    console.error('Failed to load TLS mapping:', error.message);
+  }
+}
+
+// Function to resolve TLS ID (friendly name -> actual SUMO ID)
+function resolveTlsId(inputId) {
+  if (tlsMapping.mappings && tlsMapping.mappings[inputId]) {
+    return tlsMapping.mappings[inputId];
+  }
+  return inputId; // Return as-is if no mapping found
+}
+
+// Load TLS mapping on startup
+loadTlsMapping();
+
 // Map settings (in-memory; could be persisted similarly to Settings if needed)
 // bbox: { minLat, minLon, maxLat, maxLon } for Addis Ababa by default
 let mapSettings = {
@@ -1048,12 +1077,40 @@ app.put(
 // Helper to send a command to the running SUMO bridge (stdin JSON line)
 function sendBridgeCommand(obj) {
   try {
-    if (!sumoBridgeProcess || !sumoBridgeProcess.stdin) return false;
+    console.log('🚦 SENDING TLS COMMAND:', obj);
+    
+    if (!sumoBridgeProcess) {
+      console.error('❌ BRIDGE PROCESS NOT RUNNING!');
+      return false;
+    }
+    
+    if (!sumoBridgeProcess.stdin) {
+      console.error('❌ BRIDGE STDIN NOT AVAILABLE!');
+      return false;
+    }
+    
+    if (sumoBridgeProcess.killed) {
+      console.error('❌ BRIDGE PROCESS WAS KILLED!');
+      return false;
+    }
+    
     const line = JSON.stringify(obj) + "\n";
-    sumoBridgeProcess.stdin.write(line, "utf8");
+    console.log('📤 Writing command:', line.trim());
+    
+    // Force immediate write
+    const writeResult = sumoBridgeProcess.stdin.write(line, "utf8");
+    console.log('📝 Write result:', writeResult);
+    
+    // Force flush immediately
+    if (typeof sumoBridgeProcess.stdin.flush === 'function') {
+      sumoBridgeProcess.stdin.flush();
+    }
+    
+    console.log('✅ TLS COMMAND SENT SUCCESSFULLY!');
     return true;
   } catch (e) {
-    console.error("Failed to send command to bridge:", e.message);
+    console.error('💥 FAILED TO SEND TLS COMMAND:', e.message);
+    console.error('Stack:', e.stack);
     return false;
   }
 }
@@ -1609,37 +1666,305 @@ app.post(
   }
 );
 
-// TLS phase control (super_admin, operator)
+// Get available TLS IDs and mapping
+app.get("/api/tls/available", authenticateToken, async (req, res) => {
+  try {
+    const friendlyNames = Object.keys(tlsMapping.mappings || {});
+    const allTlsIds = tlsMapping.allTlsIds || [];
+    const mappings = tlsMapping.mappings || {};
+    const reverseMapping = tlsMapping.reverseMapping || {};
+    
+    res.json({
+      friendlyNames,
+      allTlsIds,
+      mappings,
+      reverseMapping,
+      totalCount: allTlsIds.length,
+      friendlyCount: friendlyNames.length
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to get TLS data", error: error.message });
+  }
+});
+
+// Debug: forward arbitrary JSON to SUMO bridge stdin (super_admin only)
+app.post(
+  "/api/bridge/send",
+  authenticateToken,
+  requireRole("super_admin"),
+  async (req, res) => {
+    try {
+      if (!sumoBridgeProcess) return res.status(409).json({ message: "SUMO bridge is not running" });
+      const obj = req.body || {};
+      if (!obj || typeof obj !== 'object') return res.status(400).json({ message: 'JSON body required' });
+      const ok = sendBridgeCommand(obj);
+      if (!ok) return res.status(500).json({ message: 'Failed to send to bridge' });
+      return res.json({ ok: true, sent: obj });
+    } catch (e) {
+      return res.status(500).json({ message: 'Error sending to bridge', error: e.message });
+    }
+  }
+);
+
+// EMERGENCY START SIMULATION - NO AUTH (REMOVE AFTER TESTING)
+app.post("/api/sumo/emergency-start", async (req, res) => {
+  try {
+    console.log('🚑 EMERGENCY START SIMULATION!');
+    
+    let status = await SimulationStatus.findOne().sort({ lastUpdated: -1 });
+    if (!status) {
+      status = new SimulationStatus();
+    }
+    
+    if (status.isRunning) {
+      return res.json({ message: "Simulation already running", isRunning: true });
+    }
+    
+    // Start simulation immediately
+    const cfgPath = resolveSumoConfigPath("AddisAbabaSimple.sumocfg");
+    
+    status.isRunning = true;
+    status.startTime = new Date();
+    status.configPath = cfgPath;
+    status.currentStep = 0;
+    status.totalSteps = 10800;
+    status.lastUpdated = new Date();
+    await status.save();
+    
+    // Start SUMO bridge
+    const pythonExe = "python";
+    const bridgePath = require("path").join(__dirname, "sumo_bridge.py");
+    const env = { ...process.env };
+    env.PYTHONIOENCODING = "utf-8";
+    
+    const args = [
+      bridgePath,
+      "--sumo-bin", "sumo-gui",
+      "--sumo-cfg", cfgPath,
+      "--step-length", "1.0"
+    ];
+    
+    console.log('🚀 EMERGENCY: Starting SUMO bridge:', args);
+    sumoBridgeProcess = spawn(pythonExe, args, { env });
+    
+    if (sumoBridgeProcess.pid) {
+      console.log('✅ EMERGENCY: SUMO bridge started with PID:', sumoBridgeProcess.pid);
+      
+      setTimeout(() => {
+        res.json({ success: true, message: "EMERGENCY SIMULATION STARTED!", pid: sumoBridgeProcess.pid });
+      }, 3000); // Wait 3 seconds for SUMO to initialize
+    } else {
+      res.status(500).json({ success: false, message: "Failed to start SUMO bridge" });
+    }
+    
+  } catch (error) {
+    console.error('💥 EMERGENCY START FAILED:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// EMERGENCY TLS TEST - NO AUTH (REMOVE AFTER TESTING)
+app.post("/api/tls/emergency-test", async (req, res) => {
+  try {
+    console.log('🆘 EMERGENCY TLS TEST ENDPOINT HIT!');
+    
+    if (!sumoBridgeProcess) {
+      return res.status(409).json({ message: "SUMO bridge is not running" });
+    }
+    
+    // Test with atlas -> GrGr
+    const tls_id = "atlas";
+    const phase = "GrGr";
+    
+    const actualTlsId = resolveTlsId(tls_id);
+    console.log(`🗺 EMERGENCY TEST: "${tls_id}" -> "${actualTlsId}"`);
+    
+    const cmd = { type: "tls_state", id: actualTlsId, phase: phase };
+    
+    console.log('🚑 EMERGENCY: Sending TLS command:', cmd);
+    const ok = sendBridgeCommand(cmd);
+    
+    if (ok) {
+      res.json({ success: true, tls_id, phase, actualTlsId, message: "EMERGENCY TEST SENT!" });
+    } else {
+      res.status(500).json({ success: false, message: "Failed to send emergency test" });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Direct TLS state control (super_admin, operator)
+app.post(
+  "/api/tls/set-state",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      console.log('TLS state control request:', {
+        tls_id: req.body?.tls_id,
+        phase: req.body?.phase,
+        userRole: req.user?.role
+      });
+      
+      if (!["super_admin", "operator"].includes(req.user.role)) {
+        console.log('TLS state control denied: insufficient permissions');
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+      
+      if (!sumoBridgeProcess) {
+        console.log('TLS state control failed: SUMO bridge not running');
+        return res.status(409).json({ message: "SUMO bridge is not running" });
+      }
+      
+      const { tls_id, phase } = req.body || {};
+      
+      if (!tls_id || !phase) {
+        console.log('TLS state control failed: missing tls_id or phase');
+        return res.status(400).json({ message: "tls_id and phase are required" });
+      }
+      
+      // Resolve friendly name to actual SUMO TLS ID if needed
+      const actualTlsId = resolveTlsId(tls_id);
+      console.log(`TLS state mapping: "${tls_id}" -> "${actualTlsId}"`);
+      
+      const cmd = { type: "tls_state", id: actualTlsId, phase: phase };
+      
+      console.log('Sending TLS state command to bridge:', cmd);
+      const ok = sendBridgeCommand(cmd);
+      
+      if (!ok) {
+        console.log('TLS state control failed: could not send command to bridge');
+        return res.status(500).json({ message: "Failed to send command to bridge" });
+      }
+      
+      console.log('TLS state command sent successfully');
+      await recordAudit(req, "tls_state_control", tls_id, { phase, actualTlsId });
+      return res.json({ ok: true, tls_id, phase, actualTlsId });
+    } catch (error) {
+      console.error('TLS state control error:', error);
+      return res.status(500).json({ message: "Server error", error: error.message });
+    }
+  }
+);
+
+// New TLS phase control with TLS ID in body (handles long IDs)
+app.post(
+  "/api/tls/phase-control",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      console.log('TLS phase control request:', {
+        tls_id: req.body?.tls_id,
+        action: req.body?.action,
+        phaseIndex: req.body?.phaseIndex,
+        userRole: req.user?.role
+      });
+      
+      if (!["super_admin", "operator"].includes(req.user.role)) {
+        console.log('TLS control denied: insufficient permissions');
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+      
+      if (!sumoBridgeProcess) {
+        console.log('TLS control failed: SUMO bridge not running');
+        return res.status(409).json({ message: "SUMO bridge is not running" });
+      }
+      
+      const { tls_id, action, phaseIndex } = req.body || {};
+      
+      if (!tls_id || !action || !["next", "prev", "set"].includes(action)) {
+        console.log('TLS control failed: invalid parameters');
+        return res.status(400).json({ message: "Invalid parameters" });
+      }
+      
+      // Resolve friendly name to actual SUMO TLS ID
+      const actualTlsId = resolveTlsId(tls_id);
+      console.log(`🗺 TLS mapping: "${tls_id}" -> "${actualTlsId}"`);
+      
+      const cmd = { type: "tls", id: actualTlsId, cmd: action };
+      if (action === "set") {
+        if (typeof phaseIndex !== "number") {
+          console.log('TLS control failed: phaseIndex required for set action');
+          return res.status(400).json({ message: "phaseIndex required for set" });
+        }
+        cmd.phaseIndex = phaseIndex;
+      }
+      
+      console.log('🚦 Sending TLS command to bridge:', cmd);
+      const ok = sendBridgeCommand(cmd);
+      
+      if (!ok) {
+        console.log('TLS control failed: could not send command to bridge');
+        return res.status(500).json({ message: "Failed to send command to bridge" });
+      }
+      
+      console.log('✅ TLS command sent successfully');
+      await recordAudit(req, "tls_phase_control", tls_id, { action, phaseIndex, actualTlsId });
+      return res.json({ ok: true, tls_id, actualTlsId, action, phaseIndex });
+    } catch (error) {
+      console.error('💥 TLS phase control error:', error);
+      return res.status(500).json({ message: "Server error", error: error.message });
+    }
+  }
+);
+
+// OLD TLS phase control (super_admin, operator) - DEPRECATED
 app.post(
   "/api/tls/:id/phase",
   authenticateToken,
   async (req, res) => {
     try {
+      console.log('TLS phase control request:', {
+        tlsId: req.params.id,
+        action: req.body?.action,
+        phaseIndex: req.body?.phaseIndex,
+        userRole: req.user?.role
+      });
+      
       if (!["super_admin", "operator"].includes(req.user.role)) {
+        console.log('TLS control denied: insufficient permissions');
         return res.status(403).json({ message: "Insufficient permissions" });
       }
+      
       if (!sumoBridgeProcess) {
+        console.log('TLS control failed: SUMO bridge not running');
         return res.status(409).json({ message: "SUMO bridge is not running" });
       }
-      const tlsId = req.params.id;
+      
+      const friendlyTlsId = req.params.id;
       const { action, phaseIndex } = req.body || {};
-      if (!tlsId || !action || !["next", "prev", "set"].includes(action)) {
+      
+      if (!friendlyTlsId || !action || !["next", "prev", "set"].includes(action)) {
+        console.log('TLS control failed: invalid parameters');
         return res.status(400).json({ message: "Invalid action" });
       }
-      const cmd = { type: "tls", id: tlsId, cmd: action };
+      
+      // Resolve friendly name to actual SUMO TLS ID
+      const actualTlsId = resolveTlsId(friendlyTlsId);
+      console.log(`TLS mapping: "${friendlyTlsId}" -> "${actualTlsId}"`);
+      
+      const cmd = { type: "tls", id: actualTlsId, cmd: action };
       if (action === "set") {
         if (typeof phaseIndex !== "number") {
+          console.log('TLS control failed: phaseIndex required for set action');
           return res.status(400).json({ message: "phaseIndex required for set" });
         }
         cmd.phaseIndex = phaseIndex;
       }
+      
+      console.log('Sending TLS command to bridge:', cmd);
       const ok = sendBridgeCommand(cmd);
+      
       if (!ok) {
+        console.log('TLS control failed: could not send command to bridge');
         return res.status(500).json({ message: "Failed to send command to bridge" });
       }
-      await recordAudit(req, "tls_phase_control", tlsId, { action, phaseIndex });
+      
+      console.log('TLS command sent successfully');
+      await recordAudit(req, "tls_phase_control", friendlyTlsId, { action, phaseIndex, actualTlsId });
       return res.json({ ok: true });
     } catch (error) {
+      console.error('TLS phase control error:', error);
       return res.status(500).json({ message: "Server error", error: error.message });
     }
   }

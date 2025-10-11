@@ -162,16 +162,28 @@ export const parsePhaseStateToDirections = (state) => {
  */
 export const loadTlsConfigurations = async () => {
   try {
+    console.log('Loading TLS configurations from /Sumoconfigs/AddisAbaba.net.xml');
     const response = await fetch('/Sumoconfigs/AddisAbaba.net.xml');
+    
     if (!response.ok) {
+      console.error(`HTTP Error: ${response.status} ${response.statusText}`);
       throw new Error(`Failed to load .net.xml: ${response.status} ${response.statusText}`);
     }
     
+    console.log('XML file loaded successfully, parsing content...');
     const xmlContent = await response.text();
-    return parseTlsConfigurations(xmlContent);
+    
+    if (!xmlContent || xmlContent.trim().length === 0) {
+      throw new Error('XML file is empty or invalid');
+    }
+    
+    const configs = parseTlsConfigurations(xmlContent);
+    console.log('TLS configurations parsed successfully:', Object.keys(configs).length, 'traffic lights found');
+    return configs;
   } catch (error) {
     console.error('Error loading TLS configurations:', error);
-    throw error;
+    // Return empty config as fallback instead of throwing
+    return {};
   }
 };
 

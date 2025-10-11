@@ -128,23 +128,31 @@ export const api = {
     }),
 
   // TLS controls
+  getTlsAvailable: async () =>
+    fetchJson(`${BASE_API}/api/tls/available`, { headers: authHeaders() }),
   tlsNextPhase: async (id) =>
-    fetchJson(`${BASE_API}/api/tls/${id}/phase`, {
+    fetchJson(`${BASE_API}/api/tls/phase-control`, {
       method: "POST",
       headers: jsonHeaders(),
-      body: JSON.stringify({ action: "next" }),
+      body: JSON.stringify({ tls_id: id, action: "next" }),
     }),
   tlsPrevPhase: async (id) =>
-    fetchJson(`${BASE_API}/api/tls/${id}/phase`, {
+    fetchJson(`${BASE_API}/api/tls/phase-control`, {
       method: "POST",
       headers: jsonHeaders(),
-      body: JSON.stringify({ action: "prev" }),
+      body: JSON.stringify({ tls_id: id, action: "prev" }),
     }),
   tlsSetPhase: async (id, phaseIndex) =>
-    fetchJson(`${BASE_API}/api/tls/${id}/phase`, {
+    fetchJson(`${BASE_API}/api/tls/phase-control`, {
       method: "POST",
       headers: jsonHeaders(),
-      body: JSON.stringify({ action: "set", phaseIndex }),
+      body: JSON.stringify({ tls_id: id, action: "set", phaseIndex }),
+    }),
+  tlsSetState: async (tls_id, phase) =>
+    fetchJson(`${BASE_API}/api/tls/set-state`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ tls_id, phase }),
     }),
 
   // Emergencies
