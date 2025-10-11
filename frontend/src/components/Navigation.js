@@ -14,6 +14,7 @@ import {
   ClipboardDocumentListIcon,
   ChartBarIcon,
   DocumentTextIcon,
+  BeakerIcon,
   SunIcon,
   MoonIcon,
   UserIcon,
@@ -171,7 +172,7 @@ const Navigation = () => {
             <span className="link-text">SUMO Integration</span>
           </Link>
 
-          {(user?.role === "super_admin" || user?.role === "admin") && (
+          {user?.role === "super_admin" && (
             <Link
               to="/admin/emergencies"
               className={`sidebar-link ${
@@ -254,6 +255,18 @@ const Navigation = () => {
               <DocumentTextIcon className="w-5 h-5" />
             </span>
             <span className="link-text">Reports</span>
+          </Link>
+
+          <Link
+            to="/tls-test"
+            className={`sidebar-link ${isActive("/tls-test") ? "active" : ""}`}
+            onClick={closeMenu}
+            title="TLS Test Panel"
+          >
+            <span className="link-icon">
+              <BeakerIcon className="w-5 h-5" />
+            </span>
+            <span className="link-text">TLS Test</span>
           </Link>
 
           {/* {user?.role === "super_admin" && (

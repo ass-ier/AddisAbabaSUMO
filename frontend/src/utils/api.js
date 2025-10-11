@@ -91,6 +91,14 @@ export const api = {
       body: JSON.stringify({ withConfig }),
     }),
 
+  // Stats
+  getStatsOverview: async () =>
+    fetchJson(`${BASE_API}/api/stats/overview`, { headers: authHeaders() }),
+  getAdminStats: async () =>
+    fetchJson(`${BASE_API}/api/stats/admin`, { headers: authHeaders() }),
+  getUserCount: async () =>
+    fetchJson(`${BASE_API}/api/users/count`, { headers: authHeaders() }),
+
   // SUMO config selection
   listSumoConfigs: async () =>
     fetchJson(`${BASE_API}/api/sumo/configs`, { headers: authHeaders() }),
@@ -117,6 +125,34 @@ export const api = {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify(body),
+    }),
+
+  // TLS controls
+  getTlsAvailable: async () =>
+    fetchJson(`${BASE_API}/api/tls/available`, { headers: authHeaders() }),
+  tlsNextPhase: async (id) =>
+    fetchJson(`${BASE_API}/api/tls/phase-control`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ tls_id: id, action: "next" }),
+    }),
+  tlsPrevPhase: async (id) =>
+    fetchJson(`${BASE_API}/api/tls/phase-control`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ tls_id: id, action: "prev" }),
+    }),
+  tlsSetPhase: async (id, phaseIndex) =>
+    fetchJson(`${BASE_API}/api/tls/phase-control`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ tls_id: id, action: "set", phaseIndex }),
+    }),
+  tlsSetState: async (tls_id, phase) =>
+    fetchJson(`${BASE_API}/api/tls/set-state`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ tls_id, phase }),
     }),
 
   // Emergencies

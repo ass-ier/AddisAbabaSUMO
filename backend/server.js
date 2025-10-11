@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const http = require("http");
+const Redis = require("ioredis"); // Import ioredis client
 const socketIo = require("socket.io");
 const { spawn } = require("child_process");
 const path = require("path");
@@ -23,9 +24,15 @@ const PORT = process.env.PORT || 5001;
 
 // Paths and helpers for SUMO configs located in frontend/public/Sumoconfigs
 const ROOT_DIR = path.join(__dirname, "..");
-const DEFAULT_SUMO_CONFIG_DIR = path.join(ROOT_DIR, "frontend", "public", "Sumoconfigs");
+const DEFAULT_SUMO_CONFIG_DIR = path.join(
+  ROOT_DIR,
+  "frontend",
+  "public",
+  "Sumoconfigs"
+);
 function resolveSumoConfigPath(nameOrPath) {
-  if (!nameOrPath) return path.join(DEFAULT_SUMO_CONFIG_DIR, "AddisAbabaSimple.sumocfg");
+  if (!nameOrPath)
+    return path.join(DEFAULT_SUMO_CONFIG_DIR, "AddisAbabaSimple.sumocfg");
   // If absolute or contains drive letter on Windows, return as-is
   if (path.isAbsolute(nameOrPath)) return nameOrPath;
   return path.join(DEFAULT_SUMO_CONFIG_DIR, nameOrPath);
@@ -40,13 +47,25 @@ app.use(
 );
 app.use(express.json());
 
+// Redis Client Initialization
+const redisClient = new Redis({
+  port: process.env.REDIS_PORT || 6379, // Default Redis port
+  host: process.env.REDIS_HOST || "127.0.0.1", // Default Redis host
+  password: process.env.REDIS_PASSWORD || undefined, // If your Redis requires a password
+  // Enable lazy connect to prevent app crash on startup if Redis is not available.
+  // The client will attempt to connect when the first command is executed.
+  lazyConnect: true,
+});
+
+redisClient.on("connect", () => {
+  console.log("Connected to Redis!");
+});
+redisClient.on("error", (err) => console.error("Redis Client Error", err));
+
 // MongoDB Connection
 mongoose.connect(
   process.env.MONGODB_URI || "mongodb://localhost:27017/traffic_management",
-  {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  }
+  {}
 );
 
 const db = mongoose.connection;
@@ -71,7 +90,7 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   role: {
     type: String,
-    enum: ["super_admin", "admin", "operator", "analyst"],
+    enum: ["super_admin", "operator", "analyst"],
     required: true,
   },
   region: { type: String, default: "" },
@@ -163,6 +182,35 @@ const AuditLog = mongoose.model("AuditLog", auditLogSchema);
 const Emergency = mongoose.model("Emergency", emergencySchema);
 let sumoBridgeProcess = null;
 
+// TLS mapping configuration
+let tlsMapping = {};
+function loadTlsMapping() {
+  try {
+    const fs = require('fs');
+    const tlsMappingPath = path.join(__dirname, 'tls-mapping.json');
+    if (fs.existsSync(tlsMappingPath)) {
+      const data = fs.readFileSync(tlsMappingPath, 'utf8');
+      tlsMapping = JSON.parse(data);
+      console.log('TLS mapping loaded with', Object.keys(tlsMapping.mappings || {}).length, 'friendly names');
+    } else {
+      console.warn('TLS mapping file not found:', tlsMappingPath);
+    }
+  } catch (error) {
+    console.error('Failed to load TLS mapping:', error.message);
+  }
+}
+
+// Function to resolve TLS ID (friendly name -> actual SUMO ID)
+function resolveTlsId(inputId) {
+  if (tlsMapping.mappings && tlsMapping.mappings[inputId]) {
+    return tlsMapping.mappings[inputId];
+  }
+  return inputId; // Return as-is if no mapping found
+}
+
+// Load TLS mapping on startup
+loadTlsMapping();
+
 // Map settings (in-memory; could be persisted similarly to Settings if needed)
 // bbox: { minLat, minLon, maxLat, maxLon } for Addis Ababa by default
 let mapSettings = {
@@ -213,6 +261,18 @@ const requireAnyRole = (roles) => {
     next();
   };
 };
+
+// This is the correct endpoint for the "Create New User" form in UsersAdmin.jsx
+app.post(
+  "/api/users",
+  authenticateToken,
+  requireRole("super_admin"),
+  async (req, res) => {
+    // Forward the request to the existing /api/register logic
+    // This ensures consistent user creation and cache invalidation logic
+    return app._router.handle(req, res);
+  }
+);
 
 // Simple login rate limiter (memory, per IP)
 const loginAttempts = new Map();
@@ -307,6 +367,17 @@ app.post("/api/register", async (req, res) => {
 
     await user.save();
 
+    // This is a new user, so we must invalidate the user list cache.
+    try {
+      await redisClient.del("users_list");
+      console.log("Cache invalidated for: users_list");
+    } catch (e) {
+      console.error(
+        "Redis cache invalidation failed for users_list:",
+        e.message
+      );
+    }
+
     res.status(201).json({ message: "User created successfully" });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -345,6 +416,17 @@ app.post("/api/login", rateLimitLogin, async (req, res) => {
       path: "/",
     });
 
+    // Record audit: login
+    try {
+      await AuditLog.create({
+        user: user.username,
+        role: user.role,
+        action: "login",
+        target: String(user._id),
+        meta: {},
+      });
+    } catch (_) {}
+
     res.json({
       token, // also return for backward compatibility
       user: {
@@ -359,9 +441,18 @@ app.post("/api/login", rateLimitLogin, async (req, res) => {
   }
 });
 
-app.post("/api/logout", authenticateToken, (req, res) => {
+app.post("/api/logout", authenticateToken, async (req, res) => {
   try {
     res.clearCookie("access_token", { path: "/" });
+    try {
+      await AuditLog.create({
+        user: req.user?.username || "unknown",
+        role: req.user?.role || "",
+        action: "logout",
+        target: req.user?.id ? String(req.user.id) : "",
+        meta: {},
+      });
+    } catch (_) {}
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ message: "Server error" });
@@ -397,7 +488,24 @@ app.get(
   requireRole("super_admin"),
   async (req, res) => {
     try {
+      const cacheKey = "users_list";
+      try {
+        const cachedUsers = await redisClient.get(cacheKey);
+        if (cachedUsers) {
+          console.log("Serving user list from Redis cache");
+          return res.json(JSON.parse(cachedUsers));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for users_list:", e.message);
+      }
+
+      console.log("Fetching user list from database...");
       const users = await User.find().select("-password");
+      try {
+        await redisClient.set(cacheKey, JSON.stringify(users)); // Cache indefinitely until an update
+      } catch (e) {
+        console.error("Redis SET failed for users_list:", e.message);
+      }
       res.json(users);
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
@@ -420,6 +528,14 @@ app.put(
       const updated = await User.findByIdAndUpdate(req.params.id, update, {
         new: true,
       }).select("-password");
+
+      // Invalidate cache on update
+      try {
+        await redisClient.del("users_list");
+        console.log("Cache invalidated for: users_list");
+      } catch (e) {
+        console.error("Redis DEL failed for users_list:", e.message);
+      }
       await recordAudit(req, "update_user", req.params.id, { role, region });
       res.json(updated);
     } catch (error) {
@@ -436,6 +552,14 @@ app.delete(
   async (req, res) => {
     try {
       await User.findByIdAndDelete(req.params.id);
+
+      // Invalidate cache on delete
+      try {
+        await redisClient.del("users_list");
+        console.log("Cache invalidated for: users_list");
+      } catch (e) {
+        console.error("Redis DEL failed for users_list:", e.message);
+      }
       await recordAudit(req, "delete_user", req.params.id);
       res.json({ ok: true });
     } catch (error) {
@@ -451,7 +575,22 @@ app.get(
   requireRole("super_admin"),
   async (req, res) => {
     try {
+      const cacheKey = "users_count";
+      try {
+        const cachedCount = await redisClient.get(cacheKey);
+        if (cachedCount) {
+          console.log("Serving user count from Redis cache");
+          return res.json({ count: parseInt(cachedCount, 10) });
+        }
+      } catch (e) {
+        console.error("Redis GET failed for users_count:", e.message);
+      }
       const count = await User.countDocuments({});
+      try {
+        await redisClient.setex(cacheKey, 3600, count); // Cache for 1 hour
+      } catch (e) {
+        console.error("Redis SETEX failed for users_count:", e.message);
+      }
       res.json({ count });
     } catch (e) {
       res
@@ -465,12 +604,29 @@ app.get(
 app.get(
   "/api/settings",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
+      const cacheKey = "system_settings";
+      try {
+        const cachedSettings = await redisClient.get(cacheKey);
+        if (cachedSettings) {
+          console.log("Serving settings from Redis cache");
+          return res.json(JSON.parse(cachedSettings));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for system_settings:", e.message);
+      }
+
+      console.log("Fetching settings from database...");
       let s = await Settings.findOne();
       if (!s) {
         s = await Settings.create({});
+      }
+      try {
+        await redisClient.set(cacheKey, JSON.stringify(s)); // Cache indefinitely until an update
+      } catch (e) {
+        console.error("Redis SET failed for system_settings:", e.message);
       }
       res.json(s);
     } catch (error) {
@@ -491,6 +647,14 @@ app.put(
         { ...body, updatedAt: new Date() },
         { new: true, upsert: true }
       );
+
+      // Invalidate settings cache on update
+      try {
+        await redisClient.del("system_settings");
+        console.log("Cache invalidated for: system_settings");
+      } catch (e) {
+        console.error("Redis DEL failed for system_settings:", e.message);
+      }
       await recordAudit(req, "update_settings", "settings", {});
       res.json(s);
     } catch (error) {
@@ -536,7 +700,23 @@ app.get(
   requireRole("super_admin"),
   async (req, res) => {
     try {
-      const { user, role, startDate, endDate, limit = 200 } = req.query;
+      const { user, role, startDate, endDate, limit = 200 } = req.query; // Use let for query
+
+      // Create a dynamic cache key based on query parameters
+      const cacheKey = `audit_logs:${user || ""}:${role || ""}:${
+        startDate || ""
+      }:${endDate || ""}:${limit}`;
+      try {
+        const cachedLogs = await redisClient.get(cacheKey);
+        if (cachedLogs) {
+          console.log("Serving audit logs from Redis cache");
+          return res.json(JSON.parse(cachedLogs));
+        }
+      } catch (e) {
+        console.error(`Redis GET failed for ${cacheKey}:`, e.message);
+      }
+
+      console.log("Fetching audit logs from database...");
       const query = {};
       if (user) query.user = user;
       if (role) query.role = role;
@@ -548,6 +728,12 @@ app.get(
       const items = await AuditLog.find(query)
         .sort({ time: -1 })
         .limit(parseInt(limit));
+
+      try {
+        await redisClient.setex(cacheKey, 30, JSON.stringify({ items })); // Cache for 30 seconds
+      } catch (e) {
+        console.error(`Redis SETEX failed for ${cacheKey}:`, e.message);
+      }
       res.json({ items });
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
@@ -627,7 +813,21 @@ app.post("/api/traffic-data", authenticateToken, async (req, res) => {
 
 app.get("/api/traffic-data", authenticateToken, async (req, res) => {
   try {
-    const { intersectionId, startDate, endDate, limit = 100 } = req.query;
+    const { intersectionId, startDate, endDate, limit = 100 } = req.query; // Use let for query
+
+    const cacheKey = `traffic_data:${intersectionId || "all"}:${
+      startDate || ""
+    }:${endDate || ""}:${limit}`;
+    try {
+      const cachedData = await redisClient.get(cacheKey);
+      if (cachedData) {
+        console.log("Serving traffic data from Redis cache");
+        return res.json(JSON.parse(cachedData));
+      }
+    } catch (e) {
+      console.error(`Redis GET failed for ${cacheKey}:`, e.message);
+    }
+
     let query = {};
 
     if (intersectionId) {
@@ -644,6 +844,11 @@ app.get("/api/traffic-data", authenticateToken, async (req, res) => {
     const trafficData = await TrafficData.find(query)
       .sort({ timestamp: -1 })
       .limit(parseInt(limit));
+    try {
+      await redisClient.setex(cacheKey, 60, JSON.stringify(trafficData)); // Cache for 60 seconds
+    } catch (e) {
+      console.error(`Redis SETEX failed for ${cacheKey}:`, e.message);
+    }
     res.json(trafficData);
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -694,9 +899,21 @@ app.get("/api/traffic-data/export.csv", authenticateToken, async (req, res) => {
 app.get(
   "/api/reports/kpis",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
+      const cacheKey = "reports_kpis";
+      try {
+        const cachedKpis = await redisClient.get(cacheKey);
+        if (cachedKpis) {
+          console.log("Serving KPIs from Redis cache");
+          return res.json(JSON.parse(cachedKpis));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for reports_kpis:", e.message);
+      }
+
+      console.log("Fetching KPIs from database...");
       const latest = await TrafficData.find()
         .sort({ timestamp: -1 })
         .limit(100);
@@ -707,12 +924,20 @@ app.get(
               latest.length
             ).toFixed(1)
           : 0;
-      res.json({
+      const kpis = {
         uptime: 99.9,
         congestionReduction: 15.2,
         avgResponse: 24,
         avgSpeed: Number(avgSpeed),
-      });
+      };
+
+      // Cache for 60 seconds
+      try {
+        await redisClient.setex(cacheKey, 60, JSON.stringify(kpis));
+      } catch (e) {
+        console.error("Redis SETEX failed for reports_kpis:", e.message);
+      }
+      res.json(kpis);
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
     }
@@ -722,9 +947,21 @@ app.get(
 app.get(
   "/api/reports/trends",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
+      const cacheKey = "reports_trends";
+      try {
+        const cachedTrends = await redisClient.get(cacheKey);
+        if (cachedTrends) {
+          console.log("Serving trends from Redis cache");
+          return res.json(JSON.parse(cachedTrends));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for reports_trends:", e.message);
+      }
+
+      console.log("Fetching trends from database...");
       const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       const data = await TrafficData.find({ timestamp: { $gte: since } });
       const byDay = {};
@@ -742,7 +979,14 @@ app.get(
         avgSpeed: x.count ? Number((x.avgSpeed / x.count).toFixed(1)) : 0,
         emergencies: x.emergencies,
       }));
-      res.json({ daily, weekly: [] });
+      const trends = { daily, weekly: [] };
+
+      try {
+        await redisClient.setex(cacheKey, 300, JSON.stringify(trends)); // Cache for 5 minutes
+      } catch (e) {
+        console.error("Redis SETEX failed for reports_trends:", e.message);
+      }
+      res.json(trends);
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
     }
@@ -752,6 +996,17 @@ app.get(
 // SUMO config endpoints
 app.get("/api/sumo/configs", authenticateToken, async (req, res) => {
   try {
+    const cacheKey = "sumo_configs_list";
+    try {
+      const cachedConfigs = await redisClient.get(cacheKey);
+      if (cachedConfigs) {
+        console.log("Serving SUMO configs from Redis cache");
+        return res.json(JSON.parse(cachedConfigs));
+      }
+    } catch (e) {
+      console.error("Redis GET failed for sumo_configs_list:", e.message);
+    }
+
     const fs = require("fs");
     const dir = DEFAULT_SUMO_CONFIG_DIR;
     const files = fs
@@ -759,39 +1014,106 @@ app.get("/api/sumo/configs", authenticateToken, async (req, res) => {
       .filter((d) => d.isFile() && d.name.toLowerCase().endsWith(".sumocfg"))
       .map((d) => d.name)
       .sort();
-    let selected = null;
+    const s = await Settings.findOne();
+    const selected = s?.sumo?.selectedConfig || null;
+    const responseData = { directory: dir, files, selected };
     try {
-      const s = await Settings.findOne();
-      selected = s?.sumo?.selectedConfig || null;
-    } catch (_) {}
-    res.json({ directory: dir, files, selected });
+      // Cache for 10 minutes, invalidated on change.
+      await redisClient.setex(cacheKey, 600, JSON.stringify(responseData));
+    } catch (e) {
+      console.error("Redis SETEX failed for sumo_configs_list:", e.message);
+    }
+    res.json(responseData);
   } catch (e) {
-    res.status(500).json({ message: "Failed to list SUMO configs", error: e.message });
+    res
+      .status(500)
+      .json({ message: "Failed to list SUMO configs", error: e.message });
   }
 });
 
-app.put("/api/sumo/config", authenticateToken, requireAnyRole(["super_admin", "admin"]), async (req, res) => {
-  try {
-    const { name } = req.body || {};
-    if (!name || typeof name !== "string" || !name.endsWith(".sumocfg")) {
-      return res.status(400).json({ message: "Invalid config name" });
+app.put(
+  "/api/sumo/config",
+  authenticateToken,
+  requireAnyRole(["super_admin"]),
+  async (req, res) => {
+    try {
+      const { name } = req.body || {};
+      if (!name || typeof name !== "string" || !name.endsWith(".sumocfg")) {
+        return res.status(400).json({ message: "Invalid config name" });
+      }
+      const fs = require("fs");
+      const fullPath = path.join(DEFAULT_SUMO_CONFIG_DIR, name);
+      if (!fs.existsSync(fullPath)) {
+        return res.status(404).json({ message: "Config not found" });
+      }
+      const s = await Settings.findOneAndUpdate(
+        {},
+        {
+          $set: {
+            "sumo.selectedConfig": name,
+            "sumo.configDir": DEFAULT_SUMO_CONFIG_DIR,
+            updatedAt: new Date(),
+          },
+        },
+        { new: true, upsert: true }
+      );
+      await recordAudit(req, "set_sumo_config", name);
+      // Invalidate the configs list cache since the 'selected' value has changed.
+      try {
+        await redisClient.del("sumo_configs_list");
+        console.log("Cache invalidated for: sumo_configs_list");
+      } catch (e) {
+        console.error("Redis DEL failed for sumo_configs_list:", e.message);
+      }
+      res.json({ ok: true, selected: s?.sumo?.selectedConfig || name });
+    } catch (e) {
+      res
+        .status(500)
+        .json({ message: "Failed to set SUMO config", error: e.message });
     }
-    const fs = require("fs");
-    const fullPath = path.join(DEFAULT_SUMO_CONFIG_DIR, name);
-    if (!fs.existsSync(fullPath)) {
-      return res.status(404).json({ message: "Config not found" });
-    }
-    const s = await Settings.findOneAndUpdate(
-      {},
-      { $set: { "sumo.selectedConfig": name, "sumo.configDir": DEFAULT_SUMO_CONFIG_DIR, updatedAt: new Date() } },
-      { new: true, upsert: true }
-    );
-    await recordAudit(req, "set_sumo_config", name);
-    res.json({ ok: true, selected: s?.sumo?.selectedConfig || name });
-  } catch (e) {
-    res.status(500).json({ message: "Failed to set SUMO config", error: e.message });
   }
-});
+);
+
+// Helper to send a command to the running SUMO bridge (stdin JSON line)
+function sendBridgeCommand(obj) {
+  try {
+    console.log('🚦 SENDING TLS COMMAND:', obj);
+    
+    if (!sumoBridgeProcess) {
+      console.error('❌ BRIDGE PROCESS NOT RUNNING!');
+      return false;
+    }
+    
+    if (!sumoBridgeProcess.stdin) {
+      console.error('❌ BRIDGE STDIN NOT AVAILABLE!');
+      return false;
+    }
+    
+    if (sumoBridgeProcess.killed) {
+      console.error('❌ BRIDGE PROCESS WAS KILLED!');
+      return false;
+    }
+    
+    const line = JSON.stringify(obj) + "\n";
+    console.log('📤 Writing command:', line.trim());
+    
+    // Force immediate write
+    const writeResult = sumoBridgeProcess.stdin.write(line, "utf8");
+    console.log('📝 Write result:', writeResult);
+    
+    // Force flush immediately
+    if (typeof sumoBridgeProcess.stdin.flush === 'function') {
+      sumoBridgeProcess.stdin.flush();
+    }
+    
+    console.log('✅ TLS COMMAND SENT SUCCESSFULLY!');
+    return true;
+  } catch (e) {
+    console.error('💥 FAILED TO SEND TLS COMMAND:', e.message);
+    console.error('Stack:', e.stack);
+    return false;
+  }
+}
 
 // SUMO integration endpoints
 app.get("/api/sumo/status", authenticateToken, async (req, res) => {
@@ -834,7 +1156,9 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           selectedConfigName = s?.sumo?.selectedConfig || null;
         } catch (_) {}
         const envCfg = process.env.SUMO_CONFIG_PATH || "";
-        const cfgPathEffective = resolveSumoConfigPath(selectedConfigName || envCfg);
+        const cfgPathEffective = resolveSumoConfigPath(
+          selectedConfigName || envCfg
+        );
 
         status.isRunning = true;
         status.startTime = new Date();
@@ -857,12 +1181,14 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             candidates.push("python", "python3");
             for (const cmd of candidates) {
               if (!cmd) continue;
-              // If absolute path, ensure it exists
-              if (cmd.includes(":") || cmd.includes("/") || cmd.includes("\\")) {
+              if (
+                cmd.includes(":") ||
+                cmd.includes("/") ||
+                cmd.includes("\\")
+              ) {
                 if (fs.existsSync(cmd)) return cmd;
                 continue;
               }
-              // Likely on PATH
               return cmd;
             }
             return "python";
@@ -871,29 +1197,117 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           const pythonExe = selectPythonCommand();
           const bridgePath = require("path").join(__dirname, "sumo_bridge.py");
           const env = { ...process.env };
-          // Ensure SUMO tools are on PYTHONPATH for traci
+          // Ensure Python writes UTF-8 to stdout/stderr to avoid Windows cp1252 issues
+          env.PYTHONIOENCODING = env.PYTHONIOENCODING || "utf-8";
           if (process.env.SUMO_HOME) {
+            const pathMod = require("path");
             env.PYTHONPATH = [
               env.PYTHONPATH || "",
-              require("path").join(process.env.SUMO_HOME, "tools"),
+              pathMod.join(process.env.SUMO_HOME, "tools"),
             ]
               .filter(Boolean)
-              .join(require("path").delimiter);
+              .join(pathMod.delimiter);
+            // Ensure SUMO bin is on PATH so "sumo" resolves if used
+            const sumoBin = pathMod.join(process.env.SUMO_HOME, "bin");
+            env.PATH = [sumoBin, env.PATH || process.env.PATH || ""]
+              .filter(Boolean)
+              .join(pathMod.delimiter);
           }
 
-          // Decide whether to launch with GUI based on settings
+          // Decide whether to launch with GUI
           let startWithGuiFlag = false;
-          try {
-            const s = await Settings.findOne();
-            startWithGuiFlag = !!(s && s.sumo && s.sumo.startWithGui);
-          } catch (_) {}
+          if (typeof parameters.startWithGui === "boolean") {
+            startWithGuiFlag = parameters.startWithGui;
+          } else {
+            try {
+              const s = await Settings.findOne();
+              startWithGuiFlag = !!(s && s.sumo && s.sumo.startWithGui);
+            } catch (_) {}
+          }
 
-          const selectedBinary = startWithGuiFlag
-            ? process.env.SUMO_BINARY_GUI_PATH ||
-              (process.platform === "win32" ? "sumo-gui.exe" : "sumo-gui")
-            : process.env.SUMO_BINARY_PATH ||
-              (process.platform === "win32" ? "sumo.exe" : "sumo");
+          function fileExists(p) {
+            try {
+              return !!p && require("fs").existsSync(p);
+            } catch {
+              return false;
+            }
+          }
+          function resolveSumoBinary(sel, wantGui) {
+            const fs = require("fs");
+            const path = require("path");
+            const isAbs =
+              sel &&
+              (sel.includes(":") || sel.includes("/") || sel.includes("\\"));
+            if (isAbs && fileExists(sel)) return sel;
+            // Try SUMO_HOME/bin
+            if (process.env.SUMO_HOME) {
+              const bin = path.join(
+                process.env.SUMO_HOME,
+                "bin",
+                process.platform === "win32"
+                  ? wantGui
+                    ? "sumo-gui.exe"
+                    : "sumo.exe"
+                  : wantGui
+                  ? "sumo-gui"
+                  : "sumo"
+              );
+              if (fileExists(bin)) return bin;
+            }
+            // Fallback to name on PATH
+            return wantGui
+              ? process.platform === "win32"
+                ? "sumo-gui.exe"
+                : "sumo-gui"
+              : process.platform === "win32"
+              ? "sumo.exe"
+              : "sumo";
+          }
 
+          const selectedBinary = resolveSumoBinary(
+            startWithGuiFlag
+              ? process.env.SUMO_BINARY_GUI_PATH
+              : process.env.SUMO_BINARY_PATH,
+            !!startWithGuiFlag
+          );
+
+          const fsCheck = require("fs");
+          if (!fsCheck.existsSync(cfgPathEffective)) {
+            io.emit("simulationLog", {
+              level: "error",
+              message: `SUMO config not found: ${cfgPathEffective}`,
+              ts: Date.now(),
+            });
+            status.isRunning = false;
+            status.lastUpdated = new Date();
+            await status.save();
+            io.emit("simulationStatus", status);
+            return res.status(400).json({ message: "SUMO config not found" });
+          }
+          if (
+            !(
+              selectedBinary &&
+              (selectedBinary.includes(":") ||
+                selectedBinary.includes("/") ||
+                selectedBinary.includes("\\"))
+            )
+          ) {
+            // If using name on PATH, that's fine. Otherwise verify absolute path exists (handled above in resolve)
+          } else if (!fsCheck.existsSync(selectedBinary)) {
+            io.emit("simulationLog", {
+              level: "error",
+              message: `SUMO binary not found: ${selectedBinary}`,
+              ts: Date.now(),
+            });
+            status.isRunning = false;
+            status.lastUpdated = new Date();
+            await status.save();
+            io.emit("simulationStatus", status);
+            return res.status(400).json({ message: "SUMO binary not found" });
+          }
+
+          const settingsDoc = await Settings.findOne();
+          const stepLen = settingsDoc?.sumo?.stepLength || 1.0;
           const args = [
             bridgePath,
             "--sumo-bin",
@@ -901,14 +1315,75 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             "--sumo-cfg",
             cfgPathEffective,
             "--step-length",
-            String((await Settings.findOne())?.sumo?.stepLength || 1.0),
+            String(stepLen),
           ];
+
+          // Optional RL control
+          const wantRL =
+            parameters &&
+            (parameters.useRL === true ||
+              typeof parameters.rlModelPath === "string");
+          if (wantRL) {
+            const pathMod = require("path");
+            const fs = require("fs");
+            let rlModelPath = parameters.rlModelPath || "";
+            if (!rlModelPath) {
+              // Try a default model location under frontend/public/Sumoconfigs/logs/best_model.zip
+              const defaultModel = pathMod.join(
+                ROOT_DIR,
+                "frontend",
+                "public",
+                "Sumoconfigs",
+                "logs",
+                "best_model.zip"
+              );
+              if (fs.existsSync(defaultModel)) rlModelPath = defaultModel;
+            } else if (!pathMod.isAbsolute(rlModelPath)) {
+              rlModelPath = pathMod.join(ROOT_DIR, rlModelPath);
+            }
+            if (rlModelPath && fs.existsSync(rlModelPath)) {
+              args.push("--rl-model", rlModelPath);
+              args.push("--rl-delta", String(parameters.rlDelta || 15));
+              if (startWithGuiFlag) args.push("--rl-use-gui");
+              io.emit("simulationLog", {
+                level: "info",
+                message: `RL control enabled with model ${rlModelPath}`,
+                ts: Date.now(),
+              });
+            } else {
+              io.emit("simulationLog", {
+                level: "warn",
+                message: `RL model not found; running SUMO default logic`,
+                ts: Date.now(),
+              });
+            }
+          }
 
           sumoBridgeProcess = spawn(pythonExe, args, { env });
 
+          // Announce launch
+          io.emit("simulationLog", {
+            level: "info",
+            message: `Launching SUMO (${selectedBinary}) config=${cfgPathEffective} step=${stepLen}`,
+            ts: Date.now(),
+          });
+          if (sumoBridgeProcess.pid) {
+            io.emit("simulationLog", {
+              level: "info",
+              message: `SUMO bridge PID=${sumoBridgeProcess.pid}`,
+              ts: Date.now(),
+            });
+          }
+
           // Prevent crash on spawn errors and reflect status
           sumoBridgeProcess.on("error", async (err) => {
-            console.error("[SUMO BRIDGE] spawn error:", err?.message || err);
+            const msg = err?.message || String(err);
+            console.error("[SUMO BRIDGE] spawn error:", msg);
+            io.emit("simulationLog", {
+              level: "error",
+              message: `Bridge spawn error: ${msg}`,
+              ts: Date.now(),
+            });
             try {
               status.isRunning = false;
               status.endTime = new Date();
@@ -919,6 +1394,7 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           });
 
           let buffer = "";
+          let lastStepLog = 0;
           sumoBridgeProcess.stdout.on("data", (chunk) => {
             buffer += chunk.toString();
             let index;
@@ -957,21 +1433,70 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
                     };
                   } else if (payload.type === "viz") {
                     if (Array.isArray(payload.vehicles)) {
-                      payload.vehicles = payload.vehicles.filter((v) =>
-                        within(v.lat, v.lon)
-                      );
+                      // Only apply bbox if GPS is present; keep items with only XY
+                      payload.vehicles = payload.vehicles.filter((v) => {
+                        if (
+                          typeof v.lat === "number" &&
+                          typeof v.lon === "number"
+                        ) {
+                          return within(v.lat, v.lon);
+                        }
+                        return true; // keep when only XY available
+                      });
                     }
                     if (Array.isArray(payload.tls)) {
-                      payload.tls = payload.tls.filter((t) =>
-                        within(t.lat, t.lon)
-                      );
+                      // Only apply bbox if GPS is present; always keep TLS without lat/lon so frontend can join by ID
+                      payload.tls = payload.tls.filter((t) => {
+                        if (
+                          typeof t.lat === "number" &&
+                          typeof t.lon === "number"
+                        ) {
+                          return within(t.lat, t.lon);
+                        }
+                        return true;
+                      });
                     }
                   }
                 }
+                // Forward log messages from bridge
+                if (payload.type === "log") {
+                  io.emit("simulationLog", {
+                    level: payload.level || "info",
+                    message: String(payload.message || ""),
+                    ts: Date.now(),
+                  });
+                }
+
                 // Broadcast visualization and also lightweight stats
-                io.emit("viz", payload);
-                if (typeof payload.step === "number") {
-                  status.currentStep = payload.step;
+                if (payload.type === "viz") {
+                  io.emit("viz", payload);
+
+                  // Periodic console-like log (every 50 steps)
+                  if (typeof payload.step === "number") {
+                    status.currentStep = payload.step;
+                    if (payload.step >= lastStepLog + 50) {
+                      const vCount = Array.isArray(payload.vehicles)
+                        ? payload.vehicles.length
+                        : 0;
+                      const tlsCount = Array.isArray(payload.tls)
+                        ? payload.tls.length
+                        : 0;
+                      let avgSpeed = 0;
+                      if (vCount > 0) {
+                        let sum = 0;
+                        for (const v of payload.vehicles) {
+                          if (typeof v.speed === "number") sum += v.speed;
+                        }
+                        avgSpeed = Number((sum / vCount).toFixed(2));
+                      }
+                      io.emit("simulationLog", {
+                        level: "info",
+                        message: `Step ${payload.step} | vehicles=${vCount} avgSpeed=${avgSpeed}m/s tls=${tlsCount}`,
+                        ts: Date.now(),
+                      });
+                      lastStepLog = payload.step;
+                    }
+                  }
                 }
               } catch (e) {
                 // ignore malformed line
@@ -982,6 +1507,11 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
           sumoBridgeProcess.stderr.on("data", (chunk) => {
             const msg = chunk.toString();
             console.error("[SUMO BRIDGE]", msg);
+            io.emit("simulationLog", {
+              level: "warn",
+              message: msg.trim(),
+              ts: Date.now(),
+            });
           });
 
           sumoBridgeProcess.on("exit", (code) => {
@@ -990,10 +1520,20 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
             status.endTime = new Date();
             status.lastUpdated = new Date();
             status.save().then(() => io.emit("simulationStatus", status));
+            io.emit("simulationLog", {
+              level: code === 0 ? "info" : "error",
+              message: `SUMO bridge exited with code ${code}`,
+              ts: Date.now(),
+            });
             console.log(`SUMO bridge exited with code ${code}`);
           });
         } catch (err) {
           console.error("Failed to start SUMO bridge:", err);
+          io.emit("simulationLog", {
+            level: "error",
+            message: `Failed to start SUMO bridge: ${err?.message || err}`,
+            ts: Date.now(),
+          });
         }
 
         await recordAudit(req, "start_simulation", "sumo", parameters);
@@ -1087,11 +1627,11 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
   }
 });
 
-// Open SUMO GUI application (admin or super_admin)
+// Open SUMO GUI application (super_admin)
 app.post(
   "/api/sumo/open-gui",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
       const startWithCfg = req.body?.withConfig !== false; // default true
@@ -1101,7 +1641,9 @@ app.post(
         const s = await Settings.findOne();
         selectedConfigName = s?.sumo?.selectedConfig || null;
       } catch (_) {}
-      const cfgPath = resolveSumoConfigPath(selectedConfigName || process.env.SUMO_CONFIG_PATH || "");
+      const cfgPath = resolveSumoConfigPath(
+        selectedConfigName || process.env.SUMO_CONFIG_PATH || ""
+      );
       const guiBinary =
         process.env.SUMO_BINARY_GUI_PATH ||
         (process.platform === "win32" ? "sumo-gui.exe" : "sumo-gui");
@@ -1124,13 +1666,317 @@ app.post(
   }
 );
 
-// Intersection manual override (admin/super_admin)
+// Get available TLS IDs and mapping
+app.get("/api/tls/available", authenticateToken, async (req, res) => {
+  try {
+    const friendlyNames = Object.keys(tlsMapping.mappings || {});
+    const allTlsIds = tlsMapping.allTlsIds || [];
+    const mappings = tlsMapping.mappings || {};
+    const reverseMapping = tlsMapping.reverseMapping || {};
+    
+    res.json({
+      friendlyNames,
+      allTlsIds,
+      mappings,
+      reverseMapping,
+      totalCount: allTlsIds.length,
+      friendlyCount: friendlyNames.length
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to get TLS data", error: error.message });
+  }
+});
+
+// Debug: forward arbitrary JSON to SUMO bridge stdin (super_admin only)
+app.post(
+  "/api/bridge/send",
+  authenticateToken,
+  requireRole("super_admin"),
+  async (req, res) => {
+    try {
+      if (!sumoBridgeProcess) return res.status(409).json({ message: "SUMO bridge is not running" });
+      const obj = req.body || {};
+      if (!obj || typeof obj !== 'object') return res.status(400).json({ message: 'JSON body required' });
+      const ok = sendBridgeCommand(obj);
+      if (!ok) return res.status(500).json({ message: 'Failed to send to bridge' });
+      return res.json({ ok: true, sent: obj });
+    } catch (e) {
+      return res.status(500).json({ message: 'Error sending to bridge', error: e.message });
+    }
+  }
+);
+
+// EMERGENCY START SIMULATION - NO AUTH (REMOVE AFTER TESTING)
+app.post("/api/sumo/emergency-start", async (req, res) => {
+  try {
+    console.log('🚑 EMERGENCY START SIMULATION!');
+    
+    let status = await SimulationStatus.findOne().sort({ lastUpdated: -1 });
+    if (!status) {
+      status = new SimulationStatus();
+    }
+    
+    if (status.isRunning) {
+      return res.json({ message: "Simulation already running", isRunning: true });
+    }
+    
+    // Start simulation immediately
+    const cfgPath = resolveSumoConfigPath("AddisAbabaSimple.sumocfg");
+    
+    status.isRunning = true;
+    status.startTime = new Date();
+    status.configPath = cfgPath;
+    status.currentStep = 0;
+    status.totalSteps = 10800;
+    status.lastUpdated = new Date();
+    await status.save();
+    
+    // Start SUMO bridge
+    const pythonExe = "python";
+    const bridgePath = require("path").join(__dirname, "sumo_bridge.py");
+    const env = { ...process.env };
+    env.PYTHONIOENCODING = "utf-8";
+    
+    const args = [
+      bridgePath,
+      "--sumo-bin", "sumo-gui",
+      "--sumo-cfg", cfgPath,
+      "--step-length", "1.0"
+    ];
+    
+    console.log('🚀 EMERGENCY: Starting SUMO bridge:', args);
+    sumoBridgeProcess = spawn(pythonExe, args, { env });
+    
+    if (sumoBridgeProcess.pid) {
+      console.log('✅ EMERGENCY: SUMO bridge started with PID:', sumoBridgeProcess.pid);
+      
+      setTimeout(() => {
+        res.json({ success: true, message: "EMERGENCY SIMULATION STARTED!", pid: sumoBridgeProcess.pid });
+      }, 3000); // Wait 3 seconds for SUMO to initialize
+    } else {
+      res.status(500).json({ success: false, message: "Failed to start SUMO bridge" });
+    }
+    
+  } catch (error) {
+    console.error('💥 EMERGENCY START FAILED:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// EMERGENCY TLS TEST - NO AUTH (REMOVE AFTER TESTING)
+app.post("/api/tls/emergency-test", async (req, res) => {
+  try {
+    console.log('🆘 EMERGENCY TLS TEST ENDPOINT HIT!');
+    
+    if (!sumoBridgeProcess) {
+      return res.status(409).json({ message: "SUMO bridge is not running" });
+    }
+    
+    // Test with atlas -> GrGr
+    const tls_id = "atlas";
+    const phase = "GrGr";
+    
+    const actualTlsId = resolveTlsId(tls_id);
+    console.log(`🗺 EMERGENCY TEST: "${tls_id}" -> "${actualTlsId}"`);
+    
+    const cmd = { type: "tls_state", id: actualTlsId, phase: phase };
+    
+    console.log('🚑 EMERGENCY: Sending TLS command:', cmd);
+    const ok = sendBridgeCommand(cmd);
+    
+    if (ok) {
+      res.json({ success: true, tls_id, phase, actualTlsId, message: "EMERGENCY TEST SENT!" });
+    } else {
+      res.status(500).json({ success: false, message: "Failed to send emergency test" });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Direct TLS state control (super_admin, operator)
+app.post(
+  "/api/tls/set-state",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      console.log('TLS state control request:', {
+        tls_id: req.body?.tls_id,
+        phase: req.body?.phase,
+        userRole: req.user?.role
+      });
+      
+      if (!["super_admin", "operator"].includes(req.user.role)) {
+        console.log('TLS state control denied: insufficient permissions');
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+      
+      if (!sumoBridgeProcess) {
+        console.log('TLS state control failed: SUMO bridge not running');
+        return res.status(409).json({ message: "SUMO bridge is not running" });
+      }
+      
+      const { tls_id, phase } = req.body || {};
+      
+      if (!tls_id || !phase) {
+        console.log('TLS state control failed: missing tls_id or phase');
+        return res.status(400).json({ message: "tls_id and phase are required" });
+      }
+      
+      // Resolve friendly name to actual SUMO TLS ID if needed
+      const actualTlsId = resolveTlsId(tls_id);
+      console.log(`TLS state mapping: "${tls_id}" -> "${actualTlsId}"`);
+      
+      const cmd = { type: "tls_state", id: actualTlsId, phase: phase };
+      
+      console.log('Sending TLS state command to bridge:', cmd);
+      const ok = sendBridgeCommand(cmd);
+      
+      if (!ok) {
+        console.log('TLS state control failed: could not send command to bridge');
+        return res.status(500).json({ message: "Failed to send command to bridge" });
+      }
+      
+      console.log('TLS state command sent successfully');
+      await recordAudit(req, "tls_state_control", tls_id, { phase, actualTlsId });
+      return res.json({ ok: true, tls_id, phase, actualTlsId });
+    } catch (error) {
+      console.error('TLS state control error:', error);
+      return res.status(500).json({ message: "Server error", error: error.message });
+    }
+  }
+);
+
+// New TLS phase control with TLS ID in body (handles long IDs)
+app.post(
+  "/api/tls/phase-control",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      console.log('TLS phase control request:', {
+        tls_id: req.body?.tls_id,
+        action: req.body?.action,
+        phaseIndex: req.body?.phaseIndex,
+        userRole: req.user?.role
+      });
+      
+      if (!["super_admin", "operator"].includes(req.user.role)) {
+        console.log('TLS control denied: insufficient permissions');
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+      
+      if (!sumoBridgeProcess) {
+        console.log('TLS control failed: SUMO bridge not running');
+        return res.status(409).json({ message: "SUMO bridge is not running" });
+      }
+      
+      const { tls_id, action, phaseIndex } = req.body || {};
+      
+      if (!tls_id || !action || !["next", "prev", "set"].includes(action)) {
+        console.log('TLS control failed: invalid parameters');
+        return res.status(400).json({ message: "Invalid parameters" });
+      }
+      
+      // Resolve friendly name to actual SUMO TLS ID
+      const actualTlsId = resolveTlsId(tls_id);
+      console.log(`🗺 TLS mapping: "${tls_id}" -> "${actualTlsId}"`);
+      
+      const cmd = { type: "tls", id: actualTlsId, cmd: action };
+      if (action === "set") {
+        if (typeof phaseIndex !== "number") {
+          console.log('TLS control failed: phaseIndex required for set action');
+          return res.status(400).json({ message: "phaseIndex required for set" });
+        }
+        cmd.phaseIndex = phaseIndex;
+      }
+      
+      console.log('🚦 Sending TLS command to bridge:', cmd);
+      const ok = sendBridgeCommand(cmd);
+      
+      if (!ok) {
+        console.log('TLS control failed: could not send command to bridge');
+        return res.status(500).json({ message: "Failed to send command to bridge" });
+      }
+      
+      console.log('✅ TLS command sent successfully');
+      await recordAudit(req, "tls_phase_control", tls_id, { action, phaseIndex, actualTlsId });
+      return res.json({ ok: true, tls_id, actualTlsId, action, phaseIndex });
+    } catch (error) {
+      console.error('💥 TLS phase control error:', error);
+      return res.status(500).json({ message: "Server error", error: error.message });
+    }
+  }
+);
+
+// OLD TLS phase control (super_admin, operator) - DEPRECATED
+app.post(
+  "/api/tls/:id/phase",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      console.log('TLS phase control request:', {
+        tlsId: req.params.id,
+        action: req.body?.action,
+        phaseIndex: req.body?.phaseIndex,
+        userRole: req.user?.role
+      });
+      
+      if (!["super_admin", "operator"].includes(req.user.role)) {
+        console.log('TLS control denied: insufficient permissions');
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+      
+      if (!sumoBridgeProcess) {
+        console.log('TLS control failed: SUMO bridge not running');
+        return res.status(409).json({ message: "SUMO bridge is not running" });
+      }
+      
+      const friendlyTlsId = req.params.id;
+      const { action, phaseIndex } = req.body || {};
+      
+      if (!friendlyTlsId || !action || !["next", "prev", "set"].includes(action)) {
+        console.log('TLS control failed: invalid parameters');
+        return res.status(400).json({ message: "Invalid action" });
+      }
+      
+      // Resolve friendly name to actual SUMO TLS ID
+      const actualTlsId = resolveTlsId(friendlyTlsId);
+      console.log(`TLS mapping: "${friendlyTlsId}" -> "${actualTlsId}"`);
+      
+      const cmd = { type: "tls", id: actualTlsId, cmd: action };
+      if (action === "set") {
+        if (typeof phaseIndex !== "number") {
+          console.log('TLS control failed: phaseIndex required for set action');
+          return res.status(400).json({ message: "phaseIndex required for set" });
+        }
+        cmd.phaseIndex = phaseIndex;
+      }
+      
+      console.log('Sending TLS command to bridge:', cmd);
+      const ok = sendBridgeCommand(cmd);
+      
+      if (!ok) {
+        console.log('TLS control failed: could not send command to bridge');
+        return res.status(500).json({ message: "Failed to send command to bridge" });
+      }
+      
+      console.log('TLS command sent successfully');
+      await recordAudit(req, "tls_phase_control", friendlyTlsId, { action, phaseIndex, actualTlsId });
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('TLS phase control error:', error);
+      return res.status(500).json({ message: "Server error", error: error.message });
+    }
+  }
+);
+
+// Intersection manual override (super_admin)
 app.post(
   "/api/intersections/:id/override",
   authenticateToken,
   async (req, res) => {
     try {
-      if (!["admin", "super_admin"].includes(req.user.role)) {
+      if (!["super_admin"].includes(req.user.role)) {
         return res.status(403).json({ message: "Insufficient permissions" });
       }
       const intersectionId = req.params.id;
@@ -1151,9 +1997,26 @@ app.post(
 // Emergencies: list active
 app.get("/api/emergencies", authenticateToken, async (req, res) => {
   try {
+    const cacheKey = "active_emergencies";
+    try {
+      const cachedEmergencies = await redisClient.get(cacheKey);
+      if (cachedEmergencies) {
+        console.log("Serving active emergencies from Redis cache");
+        return res.json(JSON.parse(cachedEmergencies));
+      }
+    } catch (e) {
+      console.error("Redis GET failed for active_emergencies:", e.message);
+    }
+
+    console.log("Fetching active emergencies from database...");
     const items = await Emergency.find({ active: true }).sort({
       createdAt: -1,
     });
+    try {
+      await redisClient.setex(cacheKey, 10, JSON.stringify({ items })); // Cache for 10 seconds
+    } catch (e) {
+      console.error("Redis SETEX failed for active_emergencies:", e.message);
+    }
     res.json({ items });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -1166,7 +2029,7 @@ app.post(
   authenticateToken,
   async (req, res) => {
     try {
-      if (!["admin", "super_admin"].includes(req.user.role)) {
+      if (!["super_admin"].includes(req.user.role)) {
         return res.status(403).json({ message: "Insufficient permissions" });
       }
       const doc = await Emergency.findByIdAndUpdate(
@@ -1174,6 +2037,14 @@ app.post(
         { active: false },
         { new: true }
       );
+
+      // Invalidate cache on update
+      try {
+        await redisClient.del("active_emergencies");
+        console.log("Cache invalidated for: active_emergencies");
+      } catch (e) {
+        console.error("Redis DEL failed for active_emergencies:", e.message);
+      }
       await recordAudit(req, "force_clear_emergency", req.params.id);
       res.json({ ok: true, item: doc });
     } catch (error) {
@@ -1191,6 +2062,14 @@ app.post(
     try {
       const payload = req.body || {};
       const doc = await Emergency.create(payload);
+
+      // Invalidate cache on creation
+      try {
+        await redisClient.del("active_emergencies");
+        console.log("Cache invalidated for: active_emergencies");
+      } catch (e) {
+        console.error("Redis DEL failed for active_emergencies:", e.message);
+      }
       res.status(201).json({ ok: true, item: doc });
     } catch (error) {
       res.status(500).json({ message: "Server error", error: error.message });
@@ -1202,29 +2081,119 @@ app.post(
 app.get(
   "/api/stats/overview",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
-      const [userCount, activeEmergencies, latestStatus] = await Promise.all([
+      const cacheKey = "stats_overview";
+      try {
+        const cachedStats = await redisClient.get(cacheKey);
+        if (cachedStats) {
+          console.log("Serving overview stats from Redis cache");
+          return res.json(JSON.parse(cachedStats));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for stats_overview:", e.message);
+      }
+
+      console.log("Fetching overview stats from database...");
+
+      const results = await Promise.allSettled([
         User.countDocuments({}),
         Emergency.countDocuments({ active: true }),
         SimulationStatus.findOne().sort({ lastUpdated: -1 }),
+        Promise.resolve(mongoose.connection.readyState),
+        TrafficData.countDocuments({
+          timestamp: { $gte: new Date(Date.now() - 15 * 60 * 1000) },
+        }),
       ]);
+
+      const [uRes, eRes, sRes, mRes, tRes] = results;
+      const userCount =
+        uRes.status === "fulfilled" ? Number(uRes.value || 0) : 0;
+      const activeEmergencies =
+        eRes.status === "fulfilled" ? Number(eRes.value || 0) : 0;
+      const latestStatus = sRes.status === "fulfilled" ? sRes.value : null;
+      const mongoState =
+        mRes.status === "fulfilled"
+          ? mRes.value
+          : mongoose.connection.readyState;
+      const recentTrafficDocs =
+        tRes.status === "fulfilled" ? Number(tRes.value || 0) : 0;
+
+      // Log any failures for debugging without failing the endpoint
+      if (uRes.status === "rejected")
+        console.warn(
+          "[overview] userCount failed:",
+          uRes.reason?.message || uRes.reason
+        );
+      if (eRes.status === "rejected")
+        console.warn(
+          "[overview] emergencies failed:",
+          eRes.reason?.message || eRes.reason
+        );
+      if (sRes.status === "rejected")
+        console.warn(
+          "[overview] sim status failed:",
+          sRes.reason?.message || sRes.reason
+        );
+      if (tRes.status === "rejected")
+        console.warn(
+          "[overview] telemetry count failed:",
+          tRes.reason?.message || tRes.reason
+        );
+
       const activeSimulations = latestStatus?.isRunning ? 1 : 0;
 
-      // Simple health: Mongo connected and bridge not errored
-      const systemHealth = 98.5;
+      // Dynamic health score [0..100]
+      const mongoHealthy = mongoState === 1; // 1 = connected
+      const simHealthy = !!activeSimulations; // running = healthy
+      const telemetryHealthy = recentTrafficDocs > 0; // we have fresh data
 
-      res.json({
+      let score = 0;
+      score += mongoHealthy ? 40 : 0;
+      score += simHealthy ? 40 : 20; // if not running, still partially OK
+      score += telemetryHealthy ? 20 : 0;
+      const systemHealth = Math.min(100, Math.max(0, score));
+
+      const overview = {
         userCount,
         activeSimulations,
         systemHealth,
         emergencyCount: activeEmergencies,
-      });
+        health: {
+          mongoHealthy,
+          simHealthy,
+          telemetryHealthy,
+          mongoState,
+          recentTrafficDocs,
+        },
+      };
+
+      // Cache for 15 seconds
+      try {
+        await redisClient.setex(cacheKey, 15, JSON.stringify(overview));
+      } catch (e) {
+        console.error("Redis SETEX failed for stats_overview:", e.message);
+      }
+      res.json(overview);
     } catch (e) {
-      res
-        .status(500)
-        .json({ message: "Failed to load overview stats", error: e.message });
+      // Absolute fallback: best-effort values with minimal info, never 500
+      const mongoState = mongoose.connection.readyState;
+      const mongoHealthy = mongoState === 1;
+      const systemHealth = mongoHealthy ? 40 : 0;
+      return res.status(200).json({
+        userCount: 0,
+        activeSimulations: 0,
+        systemHealth,
+        emergencyCount: 0,
+        health: {
+          mongoHealthy,
+          simHealthy: false,
+          telemetryHealthy: false,
+          mongoState,
+          recentTrafficDocs: 0,
+        },
+      });
     }
   }
 );
@@ -1233,9 +2202,22 @@ app.get(
 app.get(
   "/api/stats/admin",
   authenticateToken,
-  requireAnyRole(["super_admin", "admin"]),
+  requireAnyRole(["super_admin"]),
   async (req, res) => {
     try {
+      const cacheKey = "stats_admin";
+      try {
+        const cachedStats = await redisClient.get(cacheKey);
+        if (cachedStats) {
+          console.log("Serving admin stats from Redis cache");
+          return res.json(JSON.parse(cachedStats));
+        }
+      } catch (e) {
+        console.error("Redis GET failed for stats_admin:", e.message);
+      }
+
+      console.log("Fetching admin stats from database...");
+
       const since = new Date(Date.now() - 60 * 60 * 1000);
       const recent = await TrafficData.find({ timestamp: { $gte: since } });
       const vehicleCount = recent.reduce(
@@ -1261,12 +2243,20 @@ app.get(
         active: true,
       });
 
-      res.json({
+      const adminStats = {
         activeVehicles: isNaN(activeVehicles) ? 0 : activeVehicles,
         avgSpeed,
         queueLength,
         emergencyOverrides,
-      });
+      };
+
+      // Cache for 15 seconds
+      try {
+        await redisClient.setex(cacheKey, 15, JSON.stringify(adminStats));
+      } catch (e) {
+        console.error("Redis SETEX failed for stats_admin:", e.message);
+      }
+      res.json(adminStats);
     } catch (e) {
       res
         .status(500)

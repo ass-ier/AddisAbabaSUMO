@@ -68,7 +68,6 @@ const UserManagement = () => {
   const getRoleBadge = (role) => {
     const roleColors = {
       super_admin: "#FF5722",
-      admin: "#2196F3",
       operator: "#4CAF50",
       analyst: "#FF9800",
     };
@@ -151,7 +150,6 @@ const UserManagement = () => {
                 required
               >
                 <option value="operator">Operator</option>
-                <option value="admin">Admin</option>
                 <option value="analyst">Analyst</option>
               </select>
             </div>

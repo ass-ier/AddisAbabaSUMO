@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   MapContainer,
-  TileLayer,
   Marker,
   Popup,
   Polyline,
@@ -17,6 +16,8 @@ import io from "socket.io-client";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../utils/api";
 import { parseSumoNetXml } from "../utils/sumoNetParser";
+import TrafficLightModal from "./TrafficLightModal";
+import { TrafficLightPhasePreview } from "./TrafficLightPhaseViz";
 // Optional clustering: keep footprint tiny without extra deps by grouping by grid
 
 // Fix for default markers in react-leaflet
@@ -125,68 +126,7 @@ const createVehicleIcon = (vehicle) => {
   });
 };
 
-// Intersection status icon (kept small, but modern look)
-const createIntersectionIcon = (status) => {
-  const colors = {
-    normal: "#4CAF50",
-    congested: "#FF9800",
-    critical: "#F44336",
-    emergency: "#9C27B0",
-    maintenance: "#607D8B",
-  };
-  return L.divIcon({
-    className: "custom-traffic-icon",
-    html: `<div class="intersection-dot" style="background:${
-      colors[status] || colors.normal
-    }"></div>`,
-    iconSize: [16, 16],
-    iconAnchor: [8, 8],
-  });
-};
 
-// Component to update map view based on data
-const MapController = ({ intersections, lanes, geoBounds }) => {
-  const map = useMap();
-
-  useEffect(() => {
-    // Prefer SUMO geo bounds when available
-    if (
-      geoBounds &&
-      typeof geoBounds.minLat === "number" &&
-      typeof geoBounds.minLon === "number" &&
-      typeof geoBounds.maxLat === "number" &&
-      typeof geoBounds.maxLon === "number"
-    ) {
-      const bounds = L.latLngBounds(
-        [geoBounds.minLat, geoBounds.minLon],
-        [geoBounds.maxLat, geoBounds.maxLon]
-      );
-      map.fitBounds(bounds, { padding: [20, 20] });
-      return;
-    }
-
-    // Fallback: fit to lanes
-    if (lanes && lanes.length > 0) {
-      const allPoints = lanes.flatMap((l) => l.points);
-      const bounds = L.latLngBounds(allPoints);
-      map.fitBounds(bounds, { padding: [20, 20] });
-      return;
-    }
-
-    // Fallback: fit to intersections demo data
-    if (intersections.length > 0) {
-      const bounds = L.latLngBounds(
-        intersections.map((intersection) => [
-          intersection.lat,
-          intersection.lng,
-        ])
-      );
-      map.fitBounds(bounds, { padding: [20, 20] });
-    }
-  }, [intersections, lanes, geoBounds, map]);
-
-  return null;
-};
 
 // Fit helper for SUMO bounds (guarded to avoid repeated fits/loops)
 const FitBoundsController = ({ bounds }) => {
@@ -219,20 +159,16 @@ const TrafficMap = () => {
     tls: [],
   });
   const [loading, setLoading] = useState(true);
-  const [selectedIntersection, setSelectedIntersection] = useState(null);
   const [mapView, setMapView] = useState("traffic"); // traffic, emergency, maintenance
-  const [dataMode, setDataMode] = useState("simulation"); // simulation | real
-  const [areaBbox, setAreaBbox] = useState({
-    minLat: 8.85,
-    minLon: 38.6,
-    maxLat: 9.15,
-    maxLon: 38.9,
-  });
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(5000); // 5 seconds
   const socketRef = useRef(null);
   const { user } = useAuth();
-  const [showDensity, setShowDensity] = useState(true);
+  const canOverride = !!(user && (user.role === 'super_admin' || user.role === 'operator'));
+  
+  // Traffic light modal state
+  const [selectedTlsId, setSelectedTlsId] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // SUMO Net (client-side .net.xml) view state
   const [sumoNetMode, setSumoNetMode] = useState(true);
@@ -264,7 +200,7 @@ const TrafficMap = () => {
     return L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
   }, [sumoNetData]);
 
-  // Build merged "edge" geometries from lanes (prefer live sim lanes for edge-id alignment)
+  // Build edge geometries from backend-provided lon/lat lanes for tile rendering
   const edgeGeoms = useMemo(() => {
     const sourceLanes = Array.isArray(simNetLanes) && simNetLanes.length
       ? simNetLanes
@@ -291,6 +227,16 @@ const TrafficMap = () => {
     for (let i = 0; i < all.length; i += batchSize) batches.push(all.slice(i, i + batchSize));
     return batches;
   }, [edgeGeoms]);
+
+  // Fast lookup of lane geometries by lane id (from .net.xml parsed data)
+  const laneGeomsById = useMemo(() => {
+    const m = new Map();
+    const lanes = Array.isArray(sumoNetData.lanes) ? sumoNetData.lanes : [];
+    for (const l of lanes) {
+      if (l && typeof l.id === 'string' && Array.isArray(l.points)) m.set(l.id, l.points);
+    }
+    return m;
+  }, [sumoNetData.lanes]);
 
   // Internal connector lanes to fill junctions
   const internalBatches = useMemo(() => {
@@ -424,25 +370,33 @@ const TrafficMap = () => {
     ],
   };
 
+  // Define fetchMapData before any effects use it
+  const fetchMapData = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      // Keep existing live data if any; only use mock as fallback when nothing has arrived yet
+      setMapData((prev) => ({
+        ...mockData,
+        lanes: prev.lanes?.length ? prev.lanes : [],
+        geoBounds: prev.geoBounds || null,
+        vehicles: prev.vehicles?.length ? prev.vehicles : mockData.vehicles,
+        tls: Array.isArray(prev.tls) ? prev.tls : [],
+      }));
+    } catch (error) {
+      console.error("Error fetching map data:", error);
+      window.dispatchEvent(
+        new CustomEvent("notify", {
+          detail: { type: "error", message: "Failed to refresh map" },
+        })
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     // initial fetch
     fetchMapData();
-    // load map settings
-    api
-      .getMapSettings()
-      .then((s) => {
-        if (s?.mode) setDataMode(s.mode);
-        if (
-          s?.bbox &&
-          typeof s.bbox.minLat === "number" &&
-          typeof s.bbox.minLon === "number" &&
-          typeof s.bbox.maxLat === "number" &&
-          typeof s.bbox.maxLon === "number"
-        ) {
-          setAreaBbox(s.bbox);
-        }
-      })
-      .catch(() => {});
 
     // socket connection
     socketRef.current = io("http://localhost:5001");
@@ -520,15 +474,18 @@ const TrafficMap = () => {
             setEdgeCongestion(agg);
           }
           if (payload.tls) {
+            // Keep TLS state by ID regardless of coordinates; include per-side summary and timing/program if provided
             next.tls = payload.tls
-              .filter(
-                (t) => typeof t.lat === "number" && typeof t.lon === "number"
-              )
+              .filter((t) => t && typeof t.id === 'string')
               .map((t) => ({
                 id: t.id,
-                lat: t.lat,
-                lng: t.lon,
                 state: t.state,
+                sides: t.sides,
+                turns: t.turns,
+                lat: typeof t.lat === 'number' ? t.lat : undefined,
+                lon: typeof t.lon === 'number' ? t.lon : undefined,
+                timing: t.timing,
+                program: t.program,
               }));
           }
           // Optional future: tls/intersections mapping
@@ -540,37 +497,15 @@ const TrafficMap = () => {
     return () => {
       if (socketRef.current) socketRef.current.disconnect();
     };
-  }, []);
+  }, [fetchMapData]);
 
   useEffect(() => {
     if (autoRefresh) {
       const interval = setInterval(fetchMapData, refreshInterval);
       return () => clearInterval(interval);
     }
-  }, [autoRefresh, refreshInterval]);
+  }, [autoRefresh, refreshInterval, fetchMapData]);
 
-  const fetchMapData = async () => {
-    try {
-      setLoading(true);
-      // Keep existing live data if any; only use mock as fallback when nothing has arrived yet
-      setMapData((prev) => ({
-        ...mockData,
-        lanes: prev.lanes?.length ? prev.lanes : [],
-        geoBounds: prev.geoBounds || null,
-        vehicles: prev.vehicles?.length ? prev.vehicles : mockData.vehicles,
-        tls: Array.isArray(prev.tls) ? prev.tls : [],
-      }));
-    } catch (error) {
-      console.error("Error fetching map data:", error);
-      window.dispatchEvent(
-        new CustomEvent("notify", {
-          detail: { type: "error", message: "Failed to refresh map" },
-        })
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Load SUMO .net.xml from public folder and render with CRS.Simple (Netedit-like)
   const loadSumoNetLocal = async (path = "/Sumoconfigs/AddisAbaba.net.xml") => {
@@ -597,136 +532,173 @@ const TrafficMap = () => {
   };
 
   // Auto-load SUMO net on mount so Netedit-style map shows by default if file is present
+  const loadSumoNetLocalCb = React.useCallback(loadSumoNetLocal, []);
   useEffect(() => {
-    loadSumoNetLocal();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    loadSumoNetLocalCb();
+  }, [loadSumoNetLocalCb]);
 
-  const handleIntersectionClick = (intersection) => {
-    setSelectedIntersection(intersection);
-  };
-
-  const getCongestionColor = (level) => {
-    switch (level) {
-      case "high":
-        return "#F44336";
-      case "medium":
-        return "#FF9800";
-      case "low":
-        return "#4CAF50";
-      default:
-        return "#9E9E9E";
+  // Parse TLS state string into counts and percentages
+  const summarizeTlsState = (stateStr) => {
+    const s = String(stateStr || '').toLowerCase();
+    let red = 0, yellow = 0, green = 0;
+    for (const ch of s) {
+      if (ch === 'r') red += 1;
+      else if (ch === 'y') yellow += 1;
+      else if (ch === 'g') green += 1;
+      else if (ch === 'o') red += 1; // treat off as stop
     }
+    const total = Math.max(1, red + yellow + green);
+    return { red, yellow, green, total, redPct: red/total, yellowPct: yellow/total, greenPct: green/total };
   };
 
-  const getTrafficFlowColor = (intensity) => {
-    switch (intensity) {
-      case "high":
-        return "#F44336";
-      case "medium":
-        return "#FF9800";
-      case "low":
-        return "#4CAF50";
-      default:
-        return "#9E9E9E";
-    }
+  // Small phase preview bar (r/y/g composition)
+  const PhasePreview = ({ state }) => {
+    const { redPct, yellowPct, greenPct } = summarizeTlsState(state);
+    const seg = (w, c) => (<div style={{ width: `${Math.max(8, Math.round(w*36))}px`, height: 6, background: c, borderRadius: 3 }} />);
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        {seg(redPct, '#D7263D')}
+        {seg(yellowPct, '#FFC107')}
+        {seg(greenPct, '#25A244')}
+      </div>
+    );
   };
 
-  // Simple emoji-based traffic light icon
-  const tlsEmojiIcon = () =>
-    L.divIcon({
-      className: "custom-traffic-icon",
-      html: '<div style="font-size:18px; line-height:18px">🚦</div>',
-      iconSize: [18, 18],
-      iconAnchor: [9, 9],
+  // Dynamic TLS icon showing current phase distribution and state text
+  const createTlsIconDynamic = (stateStr) => {
+    const { redPct, yellowPct, greenPct } = summarizeTlsState(stateStr);
+    const bar = (color, pct) => `<div style="height:4px;background:${color};width:${Math.max(8, Math.round(pct*16))}px;border-radius:2px"></div>`;
+    const html = `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:2px 3px;background:rgba(0,0,0,0.55);border-radius:4px;color:#fff">
+        <div style="display:flex;gap:2px;align-items:center;justify-content:center">
+          ${bar('#D7263D', redPct)}
+          ${bar('#FFC107', yellowPct)}
+          ${bar('#25A244', greenPct)}
+        </div>
+        <div style="font:700 9px/10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;letter-spacing:0.5px;opacity:0.95;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis">
+          ${String(stateStr || '').toUpperCase()}
+        </div>
+      </div>`;
+    return L.divIcon({ className: 'tls-dynamic-icon', html, iconSize: [24, 20], iconAnchor: [12, 10] });
+  };
+
+  // Panel icon: square in the middle with colored sides for N,E,S,W
+  const createTlsPanelIcon = (sides) => {
+    const color = (c) => c === 'g' ? '#25A244' : (c === 'y' ? '#FFC107' : '#D7263D');
+    const N = color(sides?.N || 'r');
+    const E = color(sides?.E || 'r');
+    const S = color(sides?.S || 'r');
+    const W = color(sides?.W || 'r');
+    const html = `
+      <div style="width:22px;height:22px;position:relative;background:rgba(0,0,0,0.35);border-radius:4px;box-shadow:0 0 2px rgba(0,0,0,0.35)">
+        <div style="position:absolute;top:0;left:3px;right:3px;height:4px;background:${N};border-radius:2px"></div>
+        <div style="position:absolute;bottom:0;left:3px;right:3px;height:4px;background:${S};border-radius:2px"></div>
+        <div style="position:absolute;top:3px;bottom:3px;right:0;width:4px;background:${E};border-radius:2px"></div>
+        <div style="position:absolute;top:3px;bottom:3px;left:0;width:4px;background:${W};border-radius:2px"></div>
+      </div>`;
+    return L.divIcon({ className: 'tls-panel-icon', html, iconSize: [22, 22], iconAnchor: [11, 11] });
+  };
+
+  // Enhanced traffic light icon with current state visualization
+  const createEnhancedTlsIcon = (tlsData) => {
+    const state = tlsData?.state || '';
+    const size = 32;
+    
+    // Create a more sophisticated traffic light icon
+    const html = `
+      <div style="
+        width: ${size}px;
+        height: ${size}px;
+        background: linear-gradient(145deg, #2c3e50, #34495e);
+        border-radius: 6px;
+        border: 2px solid #fff;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        position: relative;
+        transition: all 0.2s ease;
+      ">
+        <!-- Top light indicator -->
+        <div style="
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: ${state.toLowerCase().includes('g') ? '#25A244' : '#666'};
+          margin: 1px 0;
+          box-shadow: 0 0 3px rgba(0,0,0,0.5);
+        "></div>
+        <!-- Middle light indicator -->
+        <div style="
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: ${state.toLowerCase().includes('y') ? '#FFC107' : '#666'};
+          margin: 1px 0;
+          box-shadow: 0 0 3px rgba(0,0,0,0.5);
+        "></div>
+        <!-- Bottom light indicator -->
+        <div style="
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: ${state.toLowerCase().includes('r') ? '#D7263D' : '#666'};
+          margin: 1px 0;
+          box-shadow: 0 0 3px rgba(0,0,0,0.5);
+        "></div>
+        <!-- Clickable indicator -->
+        <div style="
+          position: absolute;
+          top: -2px;
+          right: -2px;
+          width: 8px;
+          height: 8px;
+          background: #1976D2;
+          border: 1px solid #fff;
+          border-radius: 50%;
+          font-size: 6px;
+          color: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">i</div>
+      </div>
+    `;
+    
+    return L.divIcon({
+      className: 'enhanced-tls-icon',
+      html,
+      iconSize: [size, size],
+      iconAnchor: [size/2, size/2]
     });
-
-  // Lightweight clustering by rounding coordinates into grid cells
-  const clusterVehicles = (vehicles, gridSizeDeg = 0.0015) => {
-    if (!Array.isArray(vehicles) || vehicles.length < 200) return vehicles;
-    const cellKey = (lat, lon) =>
-      `${Math.round(lat / gridSizeDeg)}:${Math.round(lon / gridSizeDeg)}`;
-    const cells = new Map();
-    for (const v of vehicles) {
-      const key = cellKey(v.lat, v.lng);
-      const cell = cells.get(key) || { lat: 0, lng: 0, count: 0 };
-      cell.lat += v.lat;
-      cell.lng += v.lng;
-      cell.count += 1;
-      cells.set(key, cell);
-    }
-    return Array.from(cells.entries()).map(([key, c], idx) => ({
-      id: `cluster_${idx}`,
-      lat: c.lat / c.count,
-      lng: c.lng / c.count,
-      type: "cluster",
-      count: c.count,
-    }));
+  };
+  
+  // Fallback emoji icon
+  const tlsEmojiIcon = () => L.divIcon({ className: 'custom-traffic-icon', html: '<div style="font-size:18px; line-height:18px">🚦</div>', iconSize: [18, 18], iconAnchor: [9, 9] });
+  
+  // Handle traffic light click
+  const handleTlsClick = (tlsId, tlsData) => {
+    setSelectedTlsId(tlsId);
+    setIsModalOpen(true);
+  };
+  
+  // Close modal handler
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setSelectedTlsId(null);
+  };
+  
+  // Get selected TLS data for modal
+  const getSelectedTlsData = () => {
+    if (!selectedTlsId || !Array.isArray(mapData.tls)) return null;
+    return mapData.tls.find(t => t.id === selectedTlsId);
   };
 
-  const totals = {
-    vehicles: mapData.vehicles.length,
-    tls: Array.isArray(mapData.tls) ? mapData.tls.length : 0,
-  };
-  const tlsCounts = Array.isArray(mapData.tls)
-    ? mapData.tls.reduce(
-        (acc, t) => {
-          const s = String(t.state || "").toLowerCase();
-          if (s.includes("r")) acc.red += 1;
-          if (s.includes("y")) acc.yellow += 1;
-          if (s.includes("g")) acc.green += 1;
-          return acc;
-        },
-        { red: 0, yellow: 0, green: 0 }
-      )
-    : { red: 0, yellow: 0, green: 0 };
 
-  const clusterColor = (count) => {
-    if (count >= 200) return "#b71c1c"; // very high
-    if (count >= 100) return "#e53935";
-    if (count >= 50) return "#fb8c00";
-    if (count >= 20) return "#fdd835";
-    return "#43a047";
-  };
 
-  const canManualOverride =
-    user?.role === "admin" || user?.role === "super_admin";
-  const manualOverride = async (intersection) => {
-    if (!canManualOverride) return;
-    if (!window.confirm(`Force green at ${intersection.name}?`)) return;
-    try {
-      await api.overrideIntersection(intersection.id, {
-        desiredState: "green",
-        durationSec: 15,
-      });
-      window.dispatchEvent(
-        new CustomEvent("notify", {
-          detail: {
-            type: "success",
-            message: `Override sent for ${intersection.name}`,
-          },
-        })
-      );
-    } catch (e) {
-      window.dispatchEvent(
-        new CustomEvent("notify", {
-          detail: {
-            type: "error",
-            message: `Failed to override ${intersection.name}`,
-          },
-        })
-      );
-    }
-  };
 
-  const filteredIntersections = mapData.intersections.filter((intersection) => {
-    if (mapView === "emergency") return intersection.status === "emergency";
-    if (mapView === "maintenance") return intersection.status === "maintenance";
-    return true;
-  });
-
-  const addisCenter = [9.03, 38.74];
-  const addisZoom = 12;
 
   return (
     <PageLayout
@@ -883,17 +855,105 @@ const TrafficMap = () => {
               <Polyline positions={congestedClasses.red} color="#D7263D" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
             )}
 
-            {/* Traffic Lights from .net.xml (junctions) */}
-            {mapView === "traffic" && Array.isArray(sumoNetData.tls) &&
-              sumoNetData.tls.map((t) => (
-                <Marker key={t.id} position={[t.lat, t.lng]} icon={tlsEmojiIcon()}>
-                  <Popup>
-                    <div>
-                      <strong>TLS {t.id}</strong>
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
+            {/* TLS from .net.xml positions with live phase state from simulation */}
+            {mapView === "traffic" && Array.isArray(sumoNetData.tls) && (() => {
+              const liveMap = new Map((Array.isArray(mapData.tls) ? mapData.tls : []).map((t) => [t.id, t]));
+              return sumoNetData.tls.map((t) => {
+                const live = liveMap.get(t.id) || {};
+                const st = live.state;
+                const timing = live.timing || {};
+                const prog = live.program || {};
+                
+                // Use enhanced icon with current state visualization
+                const icon = createEnhancedTlsIcon(live);
+                
+                const fmt = (s) => {
+                  const v = Math.max(0, Math.round(Number(s || 0)));
+                  const m = Math.floor(v / 60);
+                  const ss = v % 60;
+                  return `${m}:${String(ss).padStart(2,'0')}`;
+                };
+                
+                return (
+                  <Marker 
+                    key={t.id} 
+                    position={[t.lat, t.lng]} 
+                    icon={icon}
+                    eventHandlers={{
+                      click: () => handleTlsClick(t.id, live)
+                    }}
+                  >
+                    <Popup>
+                      <div>
+                        <div style={{ fontWeight: 700, marginBottom: 8 }}>TLS {t.id}</div>
+                        
+                        {/* Current State Summary */}
+                        <div style={{ marginBottom: 12 }}>
+                          {st && (
+                            <div style={{ marginBottom: 8 }}>
+                              <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Current Phase State:</div>
+                              <TrafficLightPhasePreview phaseState={st} width={120} height={16} />
+                            </div>
+                          )}
+                          
+                          {typeof timing.currentIndex === 'number' && (
+                            <div style={{ fontSize: 12, color: '#374151' }}>
+                              Phase {timing.currentIndex + 1}
+                              {typeof timing.remaining === 'number' && (
+                                <span style={{ marginLeft: 8, fontWeight: 600, color: '#1976D2' }}>
+                                  ({fmt(timing.remaining)} remaining)
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Quick action for authorized users */}
+                        {canOverride && (
+                          <div style={{ textAlign: 'center', marginTop: 12 }}>
+                            <button
+                              className="action-btn primary"
+                              onClick={() => handleTlsClick(t.id, live)}
+                              style={{ 
+                                padding: '8px 16px', 
+                                fontSize: '12px',
+                                background: '#1976D2',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              🚦 Control Traffic Light
+                            </button>
+                          </div>
+                        )}
+                        
+                        {!canOverride && (
+                          <div style={{ textAlign: 'center', marginTop: 12 }}>
+                            <button
+                              className="action-btn secondary"
+                              onClick={() => handleTlsClick(t.id, live)}
+                              style={{ 
+                                padding: '8px 16px', 
+                                fontSize: '12px',
+                                background: '#f5f5f5',
+                                color: '#333',
+                                border: '1px solid #ddd',
+                                borderRadius: '4px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              👁 View Status
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              });
+            })()}
 
             {/* Live vehicles from SUMO on CRS.Simple (use net coords y,x) */}
             {Array.isArray(mapData.vehicles) &&
@@ -959,7 +1019,152 @@ const TrafficMap = () => {
             </div>
           </div>
         </div>
+        
+        {/* Traffic Light Control Modal */}
+        {selectedTlsId && (
+          <TrafficLightModal
+            tlsId={selectedTlsId}
+            isOpen={isModalOpen}
+            onClose={handleModalClose}
+            timing={getSelectedTlsData()?.timing}
+            program={getSelectedTlsData()?.program}
+          />
+        )}
     </PageLayout>
+  );
+};
+
+// Render a cropped intersection schematic using actual lane geometry
+// Movement-aware arrow schematic (per-side L/S/R)
+const TlsTurnArrowsLayout = ({ turns = {} }) => {
+  const W = 260, H = 260; const cx = W/2, cy = H/2;
+  const color = (s) => s === 'g' ? '#25A244' : s === 'y' ? '#FFC107' : '#D7263D';
+  const drawArrow = (ctx) => {
+    const { x, y, dir, col } = ctx; const len = 52, bar = 8, tri = 14;
+    if (dir === 'down') {
+      return (
+        <g>
+          <rect x={x - bar/2} y={y} width={bar} height={len - tri} fill={col} rx={3} />
+          <polygon points={`${x},${y+len} ${x-10},${y+len-tri} ${x+10},${y+len-tri}`} fill={col} />
+        </g>
+      );
+    }
+    if (dir === 'up') {
+      return (
+        <g>
+          <rect x={x - bar/2} y={y - (len - tri)} width={bar} height={len - tri} fill={col} rx={3} />
+          <polygon points={`${x},${y-len} ${x-10},${y-len+tri} ${x+10},${y-len+tri}`} fill={col} />
+        </g>
+      );
+    }
+    if (dir === 'left') {
+      return (
+        <g>
+          <rect x={x - (len - tri)} y={y - bar/2} width={len - tri} height={bar} fill={col} rx={3} />
+          <polygon points={`${x-len},${y} ${x-len+tri},${y-10} ${x-len+tri},${y+10}`} fill={col} />
+        </g>
+      );
+    }
+    // right
+    return (
+      <g>
+        <rect x={x} y={y - bar/2} width={len - tri} height={bar} fill={col} rx={3} />
+        <polygon points={`${x+len},${y} ${x+len-tri},${y-10} ${x+len-tri},${y+10}`} fill={col} />
+      </g>
+    );
+  };
+  // positions
+  const gap = 24;
+  const data = [];
+  // North side (arrows go down). Place left/straight/right offset in X
+  if (turns?.N) {
+    if (turns.N.L) data.push({ x: cx - gap, y: cy - 70, dir: 'down', col: color(turns.N.L) });
+    if (turns.N.S) data.push({ x: cx, y: cy - 70, dir: 'down', col: color(turns.N.S) });
+    if (turns.N.R) data.push({ x: cx + gap, y: cy - 70, dir: 'down', col: color(turns.N.R) });
+  }
+  // South side (arrows go up)
+  if (turns?.S) {
+    if (turns.S.L) data.push({ x: cx + gap, y: cy + 70, dir: 'up', col: color(turns.S.L) });
+    if (turns.S.S) data.push({ x: cx, y: cy + 70, dir: 'up', col: color(turns.S.S) });
+    if (turns.S.R) data.push({ x: cx - gap, y: cy + 70, dir: 'up', col: color(turns.S.R) });
+  }
+  // East side (arrows go left). Offset in Y (top=left-turn when facing west)
+  if (turns?.E) {
+    if (turns.E.L) data.push({ x: cx + 70, y: cy - gap, dir: 'left', col: color(turns.E.L) });
+    if (turns.E.S) data.push({ x: cx + 70, y: cy, dir: 'left', col: color(turns.E.S) });
+    if (turns.E.R) data.push({ x: cx + 70, y: cy + gap, dir: 'left', col: color(turns.E.R) });
+  }
+  // West side (arrows go right). Offset in Y
+  if (turns?.W) {
+    if (turns.W.L) data.push({ x: cx - 70, y: cy + gap, dir: 'right', col: color(turns.W.L) });
+    if (turns.W.S) data.push({ x: cx - 70, y: cy, dir: 'right', col: color(turns.W.S) });
+    if (turns.W.R) data.push({ x: cx - 70, y: cy - gap, dir: 'right', col: color(turns.W.R) });
+  }
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', marginTop: 6 }}>
+      <rect x={0} y={0} width={W} height={H} fill="white" stroke="#e0e0e0" />
+      {data.map((ctx, i) => <g key={i}>{drawArrow(ctx)}</g>)}
+      {/* center box */}
+      <rect x={cx - 12} y={cy - 12} width={24} height={24} fill="#f5f5f5" stroke="#bdbdbd" rx={3} />
+    </svg>
+  );
+};
+
+// Fallback: Arrow-based schematic per side only
+const TlsArrowsLayout = ({ sides = {} }) => {
+  const W = 220, H = 220;
+  const cx = W / 2, cy = H / 2;
+  const color = (s) => s === 'g' ? '#25A244' : s === 'y' ? '#FFC107' : '#D7263D';
+  const N = color(sides?.N || 'r');
+  const E = color(sides?.E || 'r');
+  const S = color(sides?.S || 'r');
+  const Wc = color(sides?.W || 'r');
+  const Arrow = ({ dir }) => {
+    // Define basic arrow dimensions
+    const len = 60, bar = 8, tri = 14;
+    if (dir === 'N') {
+      return (
+        <g>
+          <rect x={cx - bar/2} y={cy - len} width={bar} height={len - tri} fill={N} rx={3} />
+          <polygon points={`${cx},${cy - len} ${cx - 10},${cy - len + tri} ${cx + 10},${cy - len + tri}`} fill={N} />
+        </g>
+      );
+    }
+    if (dir === 'S') {
+      return (
+        <g>
+          <rect x={cx - bar/2} y={cy + tri} width={bar} height={len - tri} fill={S} rx={3} />
+          <polygon points={`${cx},${cy + len} ${cx - 10},${cy + len - tri} ${cx + 10},${cy + len - tri}`} fill={S} />
+        </g>
+      );
+    }
+    if (dir === 'E') {
+      return (
+        <g>
+          <rect x={cx + tri} y={cy - bar/2} width={len - tri} height={bar} fill={E} rx={3} />
+          <polygon points={`${cx + len},${cy} ${cx + len - tri},${cy - 10} ${cx + len - tri},${cy + 10}`} fill={E} />
+        </g>
+      );
+    }
+    // W
+    return (
+      <g>
+        <rect x={cx - len} y={cy - bar/2} width={len - tri} height={bar} fill={Wc} rx={3} />
+        <polygon points={`${cx - len},${cy} ${cx - len + tri},${cy - 10} ${cx - len + tri},${cy + 10}`} fill={Wc} />
+      </g>
+    );
+  };
+  return (
+    <svg width={220} height={220} viewBox={`0 0 ${220} ${220}`} style={{ display: 'block', marginTop: 6 }}>
+      <rect x={0} y={0} width={220} height={220} fill="white" stroke="#e0e0e0" />
+      {/* Draw arrows toward center */}
+      <Arrow dir="N" />
+      <Arrow dir="S" />
+      <Arrow dir="E" />
+      <Arrow dir="W" />
+      {/* center box */}
+      <rect x={cx - 10} y={cy - 10} width={20} height={20} fill="#f5f5f5" stroke="#bdbdbd" rx={3} />
+    </svg>
   );
 };
 

@@ -37,8 +37,6 @@ const Login = () => {
       const role = user?.role;
       if (role === "super_admin") {
         navigate("/admin/users", { replace: true });
-      } else if (role === "admin") {
-        navigate("/dashboard", { replace: true });
       } else if (role === "operator" || role === "analyst") {
         navigate("/dashboard", { replace: true });
       } else {

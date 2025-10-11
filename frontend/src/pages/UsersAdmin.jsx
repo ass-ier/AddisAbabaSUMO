@@ -56,7 +56,6 @@ export default function UsersAdmin() {
   const getRoleBadge = (role) => {
     const roleColors = {
       super_admin: "#FF5722",
-      admin: "#2196F3",
       operator: "#4CAF50",
       analyst: "#FF9800",
     };
@@ -145,9 +144,7 @@ export default function UsersAdmin() {
                 required
               >
                 <option value="operator">Operator</option>
-                <option value="admin">Admin</option>
                 <option value="analyst">Analyst</option>
-                <option value="super_admin">Super Admin</option>
               </select>
             </div>
 
@@ -210,9 +207,7 @@ export default function UsersAdmin() {
                             }
                           >
                             <option value="operator">Operator</option>
-                            <option value="admin">Admin</option>
                             <option value="analyst">Analyst</option>
-                            <option value="super_admin">Super Admin</option>
                           </select>
                         </td>
                         <td>{userData.region || "N/A"}</td>
