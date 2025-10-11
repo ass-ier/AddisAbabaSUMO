@@ -298,6 +298,11 @@ const EnhancedSUMOIntegration = () => {
       name: "Night Traffic",
       description: "Low density night simulation",
     },
+    {
+      id: "accident",
+      name: "Accident Scenario",
+      description: "Traffic simulation with accident monitoring and enhanced collision detection",
+    },
   ]);
 
   const socketRef = useRef(null);
@@ -374,6 +379,7 @@ const EnhancedSUMOIntegration = () => {
           default: "AddisAbabaSimple.sumocfg",
           rush_hour: "AddisAbabaSimple_peak.sumocfg",
           night: "AddisAbabaSimple_offpeak.sumocfg",
+          accident: "AddisAbabaSimple_accident.sumocfg",
         };
         const sc = simulationStatus.scenario || "default";
         const cfgName = scenarioMap[sc] || scenarioMap.default;
