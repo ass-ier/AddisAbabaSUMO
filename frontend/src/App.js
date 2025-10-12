@@ -16,7 +16,6 @@ import Reports from "./components/Reports";
 import Navigation from "./components/Navigation";
 import "./styles/App.css";
 import UsersAdmin from "./pages/UsersAdmin";
-import SystemSettings from "./pages/SystemSettings";
 import AuditLogs from "./pages/AuditLogs";
 import ReportsAdmin from "./pages/ReportsAdmin";
 import EmergencyPanel from "./pages/EmergencyPanel";
@@ -73,16 +72,6 @@ function AppContent() {
           element={
             user && user.role === "super_admin" ? (
               <UsersAdmin />
-            ) : (
-              <Navigate to="/login" />
-            )
-          }
-        />
-        <Route
-          path="/admin/settings"
-          element={
-            user && user.role === "super_admin" ? (
-              <SystemSettings />
             ) : (
               <Navigate to="/login" />
             )

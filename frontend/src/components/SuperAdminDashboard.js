@@ -96,7 +96,7 @@ const SuperAdminDashboard = () => {
       title: "System Settings",
       description: "Configure SUMO and system parameters",
       icon: "⚙️",
-      link: "/admin/settings",
+      link: "/sumo-integration",
       color: "gray",
     },
     {

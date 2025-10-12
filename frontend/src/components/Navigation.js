@@ -10,7 +10,6 @@ import {
   LinkIcon,
   ExclamationTriangleIcon,
   UsersIcon,
-  Cog6ToothIcon,
   ClipboardDocumentListIcon,
   ChartBarIcon,
   DocumentTextIcon,
@@ -201,19 +200,6 @@ const Navigation = () => {
                   <UsersIcon className="w-5 h-5" />
                 </span>
                 <span className="link-text">Users</span>
-              </Link>
-              <Link
-                to="/admin/settings"
-                className={`sidebar-link ${
-                  isActive("/admin/settings") ? "active" : ""
-                }`}
-                onClick={closeMenu}
-                title="Settings"
-              >
-                <span className="link-icon">
-                  <Cog6ToothIcon className="w-5 h-5" />
-                </span>
-                <span className="link-text">Settings</span>
               </Link>
               <Link
                 to="/admin/audit"
