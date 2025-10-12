@@ -8,16 +8,65 @@ class AuditService {
    */
   async record(user, action, target, meta = {}) {
     try {
+      // Map action to category
+      const category = this._getActionCategory(action);
+      
       await auditRepository.create({
         user: user?.username || 'anonymous',
-        role: user?.role || '',
+        role: user?.role || 'user',
         action,
         target,
-        meta
+        category,
+        outcome: 'success',
+        details: meta
       });
     } catch (error) {
       logger.error('Audit record failed', { error: error.message });
     }
+  }
+
+  /**
+   * Map action to audit category
+   * @private
+   */
+  _getActionCategory(action) {
+    const actionLower = action.toLowerCase();
+    
+    if (actionLower.includes('login') || actionLower.includes('logout') || actionLower.includes('auth')) {
+      return 'authentication';
+    }
+    if (actionLower.includes('user') || actionLower.includes('admin')) {
+      return 'user_management';
+    }
+    if (actionLower.includes('traffic') || actionLower.includes('tls')) {
+      return 'traffic_control';
+    }
+    if (actionLower.includes('emergency')) {
+      return 'emergency_response';
+    }
+    if (actionLower.includes('config') || actionLower.includes('setting')) {
+      return 'system_configuration';
+    }
+    if (actionLower.includes('data') || actionLower.includes('export')) {
+      return 'data_access';
+    }
+    if (actionLower.includes('simulation') || actionLower.includes('sumo')) {
+      return 'simulation_control';
+    }
+    if (actionLower.includes('report')) {
+      return 'report_generation';
+    }
+    if (actionLower.includes('security') || actionLower.includes('audit')) {
+      return 'security';
+    }
+    if (actionLower.includes('maintenance') || actionLower.includes('system')) {
+      return 'system_maintenance';
+    }
+    if (actionLower.includes('api')) {
+      return 'api_access';
+    }
+    
+    return 'other';
   }
 
   /**

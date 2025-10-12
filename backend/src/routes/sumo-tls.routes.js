@@ -517,5 +517,150 @@ module.exports = function createSumoTlsRoutes(dependencies) {
     }
   });
 
+  // GET /api/sumo/scenario-config/:scenarioId - Get scenario configuration
+  router.get('/sumo/scenario-config/:scenarioId', authenticateToken, async (req, res) => {
+    try {
+      const { scenarioId } = req.params;
+      
+      if (!scenarioId || typeof scenarioId !== 'string') {
+        return res.status(400).json({ 
+          status: 'error', 
+          message: 'Invalid scenario ID' 
+        });
+      }
+
+      // Get configuration from settings
+      const settings = await Settings.findOne();
+      const scenarioConfigs = settings?.sumo?.scenarioConfigs || {};
+      const config = scenarioConfigs[scenarioId];
+
+      if (config) {
+        res.json({
+          status: 'success',
+          data: config
+        });
+      } else {
+        res.json({
+          status: 'not_found',
+          message: 'No saved configuration found for this scenario'
+        });
+      }
+    } catch (error) {
+      logger.error('Error getting scenario config:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get scenario configuration',
+        error: error.message
+      });
+    }
+  });
+
+  // PUT /api/sumo/scenario-config - Save scenario configuration
+  router.put('/sumo/scenario-config', authenticateToken, async (req, res) => {
+    try {
+      const { scenario, config } = req.body;
+      
+      if (!scenario || !config || typeof scenario !== 'string') {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Scenario name and config are required'
+        });
+      }
+
+      // Validate config structure (basic validation)
+      const requiredFields = ['stepLength', 'maxSpeed', 'minGap', 'accel', 'decel', 'sigma'];
+      const missingFields = requiredFields.filter(field => !(field in config));
+      
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Missing required config fields: ${missingFields.join(', ')}`
+        });
+      }
+
+      // Update settings with scenario configuration
+      const updatePath = `sumo.scenarioConfigs.${scenario}`;
+      const updateObj = {
+        [updatePath]: {
+          ...config,
+          lastUpdated: new Date()
+        },
+        updatedAt: new Date()
+      };
+
+      await Settings.findOneAndUpdate(
+        {},
+        { $set: updateObj },
+        { new: true, upsert: true }
+      );
+
+      await auditService.record(req.user, 'save_scenario_config', scenario, { config });
+      logger.info(`Scenario configuration saved: ${scenario}`);
+
+      res.json({
+        status: 'success',
+        message: 'Configuration saved successfully'
+      });
+    } catch (error) {
+      logger.error('Error saving scenario config:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to save scenario configuration',
+        error: error.message
+      });
+    }
+  });
+
+  // GET /api/sumo/scenarios - Get all available scenarios
+  router.get('/sumo/scenarios', authenticateToken, async (req, res) => {
+    try {
+      const scenarios = [
+        {
+          id: 'default',
+          name: 'Default Scenario',
+          description: 'Standard traffic simulation'
+        },
+        {
+          id: 'rush_hour',
+          name: 'Rush Hour',
+          description: 'High density traffic simulation'
+        },
+        {
+          id: 'night',
+          name: 'Night Traffic',
+          description: 'Low density night simulation'
+        },
+        {
+          id: 'accident',
+          name: 'Accident Scenario',
+          description: 'Traffic simulation with accident monitoring'
+        }
+      ];
+
+      // Get saved configurations from settings
+      const settings = await Settings.findOne();
+      const scenarioConfigs = settings?.sumo?.scenarioConfigs || {};
+
+      // Add configuration status to each scenario
+      const scenariosWithStatus = scenarios.map(scenario => ({
+        ...scenario,
+        hasConfiguration: !!scenarioConfigs[scenario.id],
+        lastUpdated: scenarioConfigs[scenario.id]?.lastUpdated || null
+      }));
+
+      res.json({
+        status: 'success',
+        data: scenariosWithStatus
+      });
+    } catch (error) {
+      logger.error('Error getting scenarios:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get scenarios',
+        error: error.message
+      });
+    }
+  });
+
   return router;
 };

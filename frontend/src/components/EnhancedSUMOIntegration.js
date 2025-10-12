@@ -381,7 +381,20 @@ const EnhancedSUMOIntegration = () => {
 
     // Listen for simulation status updates
     socketRef.current.on("simulationStatus", (status) => {
-      setSimulationStatus((prev) => ({ ...prev, ...status }));
+      // Safely extract only the expected properties to avoid object rendering issues
+      const data = status || {};
+      const statusUpdate = {
+        isRunning: Boolean(data.isRunning),
+        currentStep: Number(data.currentStep) || 0,
+        totalSteps: Number(data.totalSteps) || 0,
+        currentTime: Number(data.currentTime) || 0,
+        speed: Number(data.speed) || 1.0,
+        mode: typeof data.mode === 'string' ? data.mode : 'fixed',
+        scenario: typeof data.scenario === 'string' ? data.scenario : 'default',
+        startTime: data.startTime,
+        endTime: data.endTime
+      };
+      setSimulationStatus((prev) => ({ ...prev, ...statusUpdate }));
     });
 
     // Listen for real-time traffic data
@@ -484,7 +497,20 @@ const EnhancedSUMOIntegration = () => {
   const fetchSimulationStatus = async () => {
     try {
       const response = await axios.get("/api/sumo/status");
-      setSimulationStatus((prev) => ({ ...prev, ...response.data }));
+      // Safely extract only the expected properties to avoid object rendering issues
+      const data = response.data || {};
+      const statusUpdate = {
+        isRunning: Boolean(data.isRunning),
+        currentStep: Number(data.currentStep) || 0,
+        totalSteps: Number(data.totalSteps) || 0,
+        currentTime: Number(data.currentTime) || 0,
+        speed: Number(data.speed) || 1.0,
+        mode: typeof data.mode === 'string' ? data.mode : 'fixed',
+        scenario: typeof data.scenario === 'string' ? data.scenario : 'default',
+        startTime: data.startTime,
+        endTime: data.endTime
+      };
+      setSimulationStatus((prev) => ({ ...prev, ...statusUpdate }));
     } catch (error) {
       console.error("Error fetching simulation status:", error);
     }
@@ -533,7 +559,20 @@ const EnhancedSUMOIntegration = () => {
       const response = await axios.post("/api/sumo/control", payload, {
         withCredentials: true,
       });
-      setSimulationStatus((prev) => ({ ...prev, ...response.data.data, mode: lightControlMode }));
+      // Safely handle response data
+      const responseData = response.data?.data || response.data || {};
+      const statusUpdate = {
+        isRunning: Boolean(responseData.isRunning),
+        currentStep: Number(responseData.currentStep) || 0,
+        totalSteps: Number(responseData.totalSteps) || 0,
+        currentTime: Number(responseData.currentTime) || 0,
+        speed: Number(responseData.speed) || 1.0,
+        mode: lightControlMode,
+        scenario: typeof responseData.scenario === 'string' ? responseData.scenario : simulationStatus.scenario,
+        startTime: responseData.startTime,
+        endTime: responseData.endTime
+      };
+      setSimulationStatus((prev) => ({ ...prev, ...statusUpdate }));
       
       // Reset accumulative metrics when starting simulation
       if (action === "start") {
@@ -761,13 +800,13 @@ const EnhancedSUMOIntegration = () => {
                   <div className="status-item">
                     <span className="status-label">Mode:</span>
                     <span className="status-value">
-                      {simulationStatus.mode}
+                      {typeof simulationStatus.mode === 'object' ? JSON.stringify(simulationStatus.mode) : simulationStatus.mode || 'fixed'}
                     </span>
                   </div>
                   <div className="status-item">
                     <span className="status-label">Scenario:</span>
                     <span className="status-value">
-                      {simulationStatus.scenario}
+                      {typeof simulationStatus.scenario === 'object' ? JSON.stringify(simulationStatus.scenario) : simulationStatus.scenario || 'default'}
                     </span>
                   </div>
                   <div className="status-item">
@@ -964,7 +1003,7 @@ const EnhancedSUMOIntegration = () => {
                 <h3>Simulation Configuration</h3>
                 <div className="config-status">
                   <span className="scenario-info">
-                    Current Scenario: <strong>{simulationStatus.scenario || "default"}</strong>
+                    Current Scenario: <strong>{typeof simulationStatus.scenario === 'object' ? 'default' : simulationStatus.scenario || "default"}</strong>
                     {hasUnsavedChanges && <span className="unsaved-indicator">● Unsaved Changes</span>}
                   </span>
                 </div>
@@ -1155,7 +1194,7 @@ const EnhancedSUMOIntegration = () => {
                   className="btn-secondary"
                   onClick={handleResetToDefaults}
                 >
-                  Reset to {simulationStatus.scenario || "default"} Defaults
+                  Reset to {typeof simulationStatus.scenario === 'object' ? 'default' : simulationStatus.scenario || "default"} Defaults
                 </button>
               </div>
             </div>
@@ -1200,7 +1239,7 @@ const EnhancedSUMOIntegration = () => {
               <h4>Confirm Configuration Save</h4>
             </div>
             <div className="modal-body">
-              <p>Are you sure you want to save the current configuration changes for the <strong>{simulationStatus.scenario || "default"}</strong> scenario?</p>
+              <p>Are you sure you want to save the current configuration changes for the <strong>{typeof simulationStatus.scenario === 'object' ? 'default' : simulationStatus.scenario || "default"}</strong> scenario?</p>
               <div className="config-changes-summary">
                 <p><small>This will update the scenario's default parameters for future simulations.</small></p>
               </div>
