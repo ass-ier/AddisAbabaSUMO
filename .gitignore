@@ -209,7 +209,6 @@ traci.log
 *.model
 *.weights
 checkpoints/
-models/
 logs/
 experiments/
 evaluation_results/
