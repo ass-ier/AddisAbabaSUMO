@@ -2,7 +2,11 @@ import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import io from "socket.io-client";
 import PageLayout from "./PageLayout";
+import connectionTest from "../utils/connectionTest";
 import "./EnhancedSUMOIntegration.css";
+
+// API base URL configuration
+const API_BASE_URL = process.env.REACT_APP_API_BASE || "http://localhost:5001";
 
 const EnhancedSUMOIntegration = () => {
   // Simulation State
@@ -365,19 +369,35 @@ const EnhancedSUMOIntegration = () => {
     },
   };
 
+  // Helper function to get auth headers
+  const getAuthHeaders = () => {
+    const token = sessionStorage.getItem("token");
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+  };
+
   // SUMO config setter (no local state needed)
   const setSumoConfig = async (name) => {
     try {
-      await axios.put("/api/sumo/config", { name }, { withCredentials: true });
+      await axios.put(`${API_BASE_URL}/api/sumo/config`, { name }, {
+        headers: getAuthHeaders(),
+        withCredentials: true
+      });
       addLog(`SUMO config set to ${name}`, "success");
     } catch (e) {
-      addLog(`Failed to set SUMO config: ${e.message}`, "error");
+      addLog(`Failed to set SUMO config: ${e.response?.data?.message || e.message}`, "error");
     }
   };
 
   useEffect(() => {
-    // Initialize socket connection
-    socketRef.current = io("http://localhost:5001");
+    // Initialize socket connection with proper configuration
+    socketRef.current = io(API_BASE_URL, {
+      transports: ['websocket', 'polling'],
+      timeout: 20000,
+      forceNew: true
+    });
 
     // Listen for simulation status updates
     socketRef.current.on("simulationStatus", (status) => {
@@ -496,7 +516,10 @@ const EnhancedSUMOIntegration = () => {
 
   const fetchSimulationStatus = async () => {
     try {
-      const response = await axios.get("/api/sumo/status");
+      const response = await axios.get(`${API_BASE_URL}/api/sumo/status`, {
+        headers: getAuthHeaders(),
+        withCredentials: true
+      });
       // Safely extract only the expected properties to avoid object rendering issues
       const data = response.data || {};
       const statusUpdate = {
@@ -513,11 +536,14 @@ const EnhancedSUMOIntegration = () => {
       setSimulationStatus((prev) => ({ ...prev, ...statusUpdate }));
     } catch (error) {
       console.error("Error fetching simulation status:", error);
+      addLog(`Failed to fetch simulation status: ${error.response?.data?.message || error.message}`, "error");
     }
   };
 
   const handleSimulationControl = async (action) => {
     setIsLoading(true);
+    addLog(`${action === 'start' ? 'Starting' : 'Stopping'} simulation...`, "info");
+    
     try {
       // Align with backend API: expects { command: "start_simulation" | ... }
       const commandMap = {
@@ -556,8 +582,11 @@ const EnhancedSUMOIntegration = () => {
           payload.parameters.rlDelta = 15; // decision interval (s)
         }
       }
-      const response = await axios.post("/api/sumo/control", payload, {
+      
+      const response = await axios.post(`${API_BASE_URL}/api/sumo/control`, payload, {
+        headers: getAuthHeaders(),
         withCredentials: true,
+        timeout: 30000, // 30 second timeout
       });
       // Safely handle response data
       const responseData = response.data?.data || response.data || {};
@@ -599,7 +628,17 @@ const EnhancedSUMOIntegration = () => {
       addLog(`Simulation ${action} command executed successfully (${lightControlMode.toUpperCase()} control)`, "success");
     } catch (error) {
       console.error(`Error ${action}ing simulation:`, error);
-      addLog(`Failed to ${action} simulation: ${error.message}`, "error");
+      
+      let errorMessage = error.message;
+      if (error.response) {
+        // Server responded with error status
+        errorMessage = error.response.data?.message || `Server error (${error.response.status}): ${error.response.statusText}`;
+      } else if (error.request) {
+        // Request was made but no response received
+        errorMessage = "No response from server. Please check if the backend is running.";
+      }
+      
+      addLog(`Failed to ${action} simulation: ${errorMessage}`, "error");
     } finally {
       setIsLoading(false);
     }
@@ -614,7 +653,8 @@ const EnhancedSUMOIntegration = () => {
   const loadScenarioConfig = async (scenarioId) => {
     try {
       // First try to load saved configuration from backend
-      const response = await axios.get(`/api/sumo/scenario-config/${scenarioId}`, {
+      const response = await axios.get(`${API_BASE_URL}/api/sumo/scenario-config/${scenarioId}`, {
+        headers: getAuthHeaders(),
         withCredentials: true
       });
       
@@ -659,10 +699,13 @@ const EnhancedSUMOIntegration = () => {
       const currentScenario = simulationStatus.scenario || "default";
       
       // Send configuration to backend
-      const response = await axios.put('/api/sumo/scenario-config', {
+      const response = await axios.put(`${API_BASE_URL}/api/sumo/scenario-config`, {
         scenario: currentScenario,
         config: config
-      }, { withCredentials: true });
+      }, { 
+        headers: getAuthHeaders(),
+        withCredentials: true 
+      });
       
       if (response.data.status === 'success') {
         setOriginalConfig({ ...config });
@@ -691,6 +734,22 @@ const EnhancedSUMOIntegration = () => {
       await loadScenarioConfig(scenarioId); // Load scenario-specific configuration
       addLog(`Scenario changed to: ${scenario.name}`, "info");
     }
+  };
+
+  // Debug connection function
+  const testConnection = async () => {
+    addLog("🔍 Starting connection diagnostics...", "info");
+    connectionTest.logConnectionInfo();
+    
+    const results = await connectionTest.runAllTests();
+    
+    // Log results to both console and UI logs
+    Object.entries(results).forEach(([test, result]) => {
+      const status = result.success ? "success" : "error";
+      addLog(`${test.toUpperCase()} Test: ${result.message}`, status);
+    });
+    
+    addLog("🔍 Connection diagnostics completed. Check browser console for details.", "info");
   };
 
   const addLog = (message, type = "info") => {
@@ -866,15 +925,19 @@ const EnhancedSUMOIntegration = () => {
                   }`}
                   onClick={() => handleSimulationControl("start")}
                   disabled={simulationStatus.isRunning || isLoading}
+                  title={simulationStatus.isRunning ? "Simulation is already running" : "Start simulation"}
                 >
-                  ▶️ Start
+                  {isLoading && !simulationStatus.isRunning ? "⏳ Starting..." : "▶️ Start"}
                 </button>
                 <button
-                  className="control-btn stop"
+                  className={`control-btn stop ${
+                    !simulationStatus.isRunning ? "disabled" : ""
+                  }`}
                   onClick={() => handleSimulationControl("stop")}
                   disabled={!simulationStatus.isRunning || isLoading}
+                  title={!simulationStatus.isRunning ? "No simulation is running" : "Stop simulation"}
                 >
-                  ⏹️ Stop
+                  {isLoading && simulationStatus.isRunning ? "⏳ Stopping..." : "⏹️ Stop"}
                 </button>
               </div>
 
@@ -1207,9 +1270,14 @@ const EnhancedSUMOIntegration = () => {
             <div className="logs-panel">
               <div className="logs-header">
                 <h3>Simulation Logs</h3>
-                <button className="btn-secondary" onClick={() => setLogs([])}>
-                  Clear Logs
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn-secondary" onClick={testConnection}>
+                    🔍 Test Connection
+                  </button>
+                  <button className="btn-secondary" onClick={() => setLogs([])}>
+                    Clear Logs
+                  </button>
+                </div>
               </div>
               <div className="logs-container">
                 {logs.length === 0 ? (

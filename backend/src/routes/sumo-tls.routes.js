@@ -146,7 +146,15 @@ module.exports = function createSumoTlsRoutes(dependencies) {
     try {
       let status = await SimulationStatus.findOne().sort({ lastUpdated: -1 });
       if (!status) {
-        status = new SimulationStatus({ isRunning: false });
+        status = new SimulationStatus({
+          name: 'Default Simulation Status',
+          isRunning: false,
+          status: 'stopped',
+          configuration: {
+            networkFile: 'default.net.xml',
+            totalSteps: 10800
+          }
+        });
         await status.save();
       }
       res.json(status);
@@ -211,10 +219,19 @@ module.exports = function createSumoTlsRoutes(dependencies) {
   // POST /api/sumo/control - Control SUMO simulation
   router.post('/sumo/control', authenticateToken, async (req, res) => {
     try {
+      logger.info('SUMO control request received', { command: req.body.command, user: req.user?.username });
       const { command, parameters = {} } = req.body;
       let status = await SimulationStatus.findOne().sort({ lastUpdated: -1 });
       if (!status) {
-        status = new SimulationStatus();
+        status = new SimulationStatus({
+          name: 'SUMO Control Session',
+          isRunning: false,
+          status: 'stopped',
+          configuration: {
+            networkFile: 'default.net.xml',
+            totalSteps: 10800
+          }
+        });
       }
 
       switch (command) {
@@ -247,12 +264,29 @@ module.exports = function createSumoTlsRoutes(dependencies) {
             logger.warn('Failed to load settings for simulation start:', e.message);
           }
 
+          // Generate simulation ID if not present
+          if (!status.simulationId) {
+            const timestamp = Date.now().toString().slice(-8);
+            const random = Math.random().toString(36).substr(2, 4).toUpperCase();
+            status.simulationId = `SIM-${timestamp}-${random}`;
+          }
+          
+          // Set required fields
+          status.name = status.name || `SUMO Simulation ${new Date().toLocaleString()}`;
           status.isRunning = true;
+          status.status = 'starting';
           status.startTime = new Date();
-          status.configPath = cfgPathEffective;
-          status.currentStep = 0;
-          status.totalSteps = 10800;
           status.lastUpdated = new Date();
+          
+          // Set configuration fields
+          if (!status.configuration) {
+            status.configuration = {};
+          }
+          status.configuration.networkFile = status.configuration.networkFile || 'default.net.xml';
+          status.configuration.totalSteps = 10800;
+          status.configuration.currentStep = 0;
+          status.configuration.stepLength = stepLength;
+          status.configuration.guiEnabled = startWithGui;
           await status.save();
 
           io.emit('simulationStatus', status);
@@ -279,7 +313,7 @@ module.exports = function createSumoTlsRoutes(dependencies) {
                   
                   // Update simulation step
                   if (payload.step) {
-                    status.currentStep = payload.step;
+                    status.configuration.currentStep = payload.step;
                     status.lastUpdated = new Date();
                     status.save().catch(() => {});
                   }
@@ -439,6 +473,12 @@ module.exports = function createSumoTlsRoutes(dependencies) {
           res.status(400).json({ message: 'Invalid command' });
       }
     } catch (error) {
+      logger.error('SUMO control error:', { 
+        error: error.message, 
+        stack: error.stack, 
+        command: req.body?.command,
+        user: req.user?.username 
+      });
       res.status(500).json({ message: 'SUMO command error', error: error.message });
     }
   });

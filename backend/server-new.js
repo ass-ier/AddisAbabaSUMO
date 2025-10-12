@@ -24,8 +24,6 @@ const PORT = process.env.PORT || 5001;
 const ROOT_DIR = path.join(__dirname, '..');
 const DEFAULT_SUMO_CONFIG_DIR = path.join(
   ROOT_DIR,
-  'frontend',
-  'public',
   'Sumoconfigs'
 );
 

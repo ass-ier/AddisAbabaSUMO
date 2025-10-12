@@ -26,12 +26,10 @@ const io = socketIo(server, {
 
 const PORT = process.env.PORT || 5001;
 
-// Paths and helpers for SUMO configs located in frontend/public/Sumoconfigs
+// Paths and helpers for SUMO configs located in Sumoconfigs directory
 const ROOT_DIR = path.join(__dirname, "..");
 const DEFAULT_SUMO_CONFIG_DIR = path.join(
   ROOT_DIR,
-  "frontend",
-  "public",
   "Sumoconfigs"
 );
 function resolveSumoConfigPath(nameOrPath) {
