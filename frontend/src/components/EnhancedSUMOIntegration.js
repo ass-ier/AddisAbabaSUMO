@@ -281,6 +281,9 @@ const EnhancedSUMOIntegration = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("control");
   const [logs, setLogs] = useState([]);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [originalConfig, setOriginalConfig] = useState(null);
   const [scenarios] = useState([
     {
       id: "default",
@@ -305,6 +308,62 @@ const EnhancedSUMOIntegration = () => {
   ]);
 
   const socketRef = useRef(null);
+
+  // Scenario-specific default configurations
+  const scenarioConfigs = {
+    default: {
+      stepLength: 1.0,
+      startWithGui: true,
+      maxSpeed: 13.89, // 50 km/h
+      minGap: 2.5,
+      accel: 2.6,
+      decel: 4.5,
+      sigma: 0.5,
+      lcStrategic: 1.0,
+      lcCooperative: 1.0,
+      lcSpeedGain: 1.0,
+      lcKeepRight: 1.0,
+    },
+    rush_hour: {
+      stepLength: 0.8,
+      startWithGui: true,
+      maxSpeed: 11.11, // 40 km/h (slower in peak)
+      minGap: 2.0, // Tighter gaps
+      accel: 2.2, // Slower acceleration
+      decel: 5.0, // Faster deceleration
+      sigma: 0.7, // More randomness
+      lcStrategic: 1.5, // More strategic
+      lcCooperative: 0.8, // Less cooperative
+      lcSpeedGain: 1.2,
+      lcKeepRight: 0.8,
+    },
+    night: {
+      stepLength: 1.2,
+      startWithGui: true,
+      maxSpeed: 16.67, // 60 km/h (faster at night)
+      minGap: 3.0, // Larger gaps
+      accel: 2.8,
+      decel: 4.0,
+      sigma: 0.3, // Less randomness
+      lcStrategic: 0.8,
+      lcCooperative: 1.2, // More cooperative
+      lcSpeedGain: 0.8,
+      lcKeepRight: 1.2,
+    },
+    accident: {
+      stepLength: 0.5, // Smaller steps for better accident detection
+      startWithGui: true,
+      maxSpeed: 8.33, // 30 km/h (emergency speed)
+      minGap: 3.5, // Larger safety gaps
+      accel: 1.8, // Cautious acceleration
+      decel: 6.0, // Emergency braking capability
+      sigma: 0.2, // Less randomness for safety
+      lcStrategic: 0.5, // Less lane changing
+      lcCooperative: 1.5, // More cooperative
+      lcSpeedGain: 0.5,
+      lcKeepRight: 1.5,
+    },
+  };
 
   // SUMO config setter (no local state needed)
   const setSumoConfig = async (name) => {
@@ -415,6 +474,12 @@ const EnhancedSUMOIntegration = () => {
       }
     };
   }, []);
+  
+  // Load initial scenario configuration
+  useEffect(() => {
+    const initialScenario = simulationStatus.scenario || "default";
+    loadScenarioConfig(initialScenario);
+  }, []); // Only run once on mount
 
   const fetchSimulationStatus = async () => {
     try {
@@ -504,12 +569,87 @@ const EnhancedSUMOIntegration = () => {
 
   const handleConfigChange = (key, value) => {
     setConfig((prev) => ({ ...prev, [key]: value }));
+    setHasUnsavedChanges(true);
+  };
+  
+  const loadScenarioConfig = async (scenarioId) => {
+    try {
+      // First try to load saved configuration from backend
+      const response = await axios.get(`/api/sumo/scenario-config/${scenarioId}`, {
+        withCredentials: true
+      });
+      
+      let scenarioConfig;
+      if (response.data.status === 'success' && response.data.data) {
+        // Use saved configuration from backend
+        scenarioConfig = response.data.data;
+        addLog(`Loaded saved configuration for ${scenarioId} scenario`, "info");
+      } else {
+        // Fall back to default configuration
+        scenarioConfig = scenarioConfigs[scenarioId] || scenarioConfigs.default;
+        addLog(`Loaded default configuration for ${scenarioId} scenario`, "info");
+      }
+      
+      const newConfig = { ...config, ...scenarioConfig };
+      setConfig(newConfig);
+      setOriginalConfig(newConfig);
+      setHasUnsavedChanges(false);
+      
+    } catch (error) {
+      // Fall back to default configuration on error
+      console.error('Error loading scenario config:', error);
+      const scenarioConfig = scenarioConfigs[scenarioId] || scenarioConfigs.default;
+      const newConfig = { ...config, ...scenarioConfig };
+      setConfig(newConfig);
+      setOriginalConfig(newConfig);
+      setHasUnsavedChanges(false);
+      addLog(`Loaded default configuration for ${scenarioId} scenario (backend error)`, "warning");
+    }
+  };
+  
+  const handleSaveConfiguration = () => {
+    if (!hasUnsavedChanges) {
+      addLog("No changes to save", "info");
+      return;
+    }
+    setShowConfirmDialog(true);
+  };
+  
+  const confirmSaveConfiguration = async () => {
+    try {
+      const currentScenario = simulationStatus.scenario || "default";
+      
+      // Send configuration to backend
+      const response = await axios.put('/api/sumo/scenario-config', {
+        scenario: currentScenario,
+        config: config
+      }, { withCredentials: true });
+      
+      if (response.data.status === 'success') {
+        setOriginalConfig({ ...config });
+        setHasUnsavedChanges(false);
+        setShowConfirmDialog(false);
+        addLog(`Configuration saved successfully for ${currentScenario} scenario`, "success");
+      } else {
+        throw new Error(response.data.message || 'Save failed');
+      }
+    } catch (error) {
+      addLog(`Failed to save configuration: ${error.response?.data?.message || error.message}`, "error");
+      setShowConfirmDialog(false);
+    }
+  };
+  
+  const handleResetToDefaults = () => {
+    const currentScenario = simulationStatus.scenario || "default";
+    loadScenarioConfig(currentScenario);
+    addLog(`Configuration reset to ${currentScenario} defaults`, "info");
   };
 
-  const handleScenarioChange = (scenarioId) => {
+  const handleScenarioChange = async (scenarioId) => {
     const scenario = scenarios.find((s) => s.id === scenarioId);
     if (scenario) {
       setSimulationStatus((prev) => ({ ...prev, scenario: scenarioId }));
+      await loadScenarioConfig(scenarioId); // Load scenario-specific configuration
       addLog(`Scenario changed to: ${scenario.name}`, "info");
     }
   };
@@ -820,7 +960,15 @@ const EnhancedSUMOIntegration = () => {
         {activeTab === "config" && (
           <div className="tab-content">
             <div className="config-panel">
-              <h3>Simulation Configuration</h3>
+              <div className="config-header">
+                <h3>Simulation Configuration</h3>
+                <div className="config-status">
+                  <span className="scenario-info">
+                    Current Scenario: <strong>{simulationStatus.scenario || "default"}</strong>
+                    {hasUnsavedChanges && <span className="unsaved-indicator">● Unsaved Changes</span>}
+                  </span>
+                </div>
+              </div>
               <div className="config-sections">
                 <div className="config-section">
                   <h4>Basic Parameters</h4>
@@ -996,9 +1144,19 @@ const EnhancedSUMOIntegration = () => {
               </div>
 
               <div className="config-actions">
-                <button className="btn-primary">Save Configuration</button>
-                <button className="btn-secondary">Reset to Defaults</button>
-                <button className="btn-secondary">Load Preset</button>
+                <button 
+                  className={`btn-primary ${hasUnsavedChanges ? '' : 'disabled'}`}
+                  onClick={handleSaveConfiguration}
+                  disabled={!hasUnsavedChanges}
+                >
+                  Save Configuration
+                </button>
+                <button 
+                  className="btn-secondary"
+                  onClick={handleResetToDefaults}
+                >
+                  Reset to {simulationStatus.scenario || "default"} Defaults
+                </button>
               </div>
             </div>
           </div>
@@ -1033,6 +1191,37 @@ const EnhancedSUMOIntegration = () => {
           </div>
         )}
       </div>
+      
+      {/* Configuration Save Confirmation Dialog */}
+      {showConfirmDialog && (
+        <div className="modal-overlay">
+          <div className="modal-dialog">
+            <div className="modal-header">
+              <h4>Confirm Configuration Save</h4>
+            </div>
+            <div className="modal-body">
+              <p>Are you sure you want to save the current configuration changes for the <strong>{simulationStatus.scenario || "default"}</strong> scenario?</p>
+              <div className="config-changes-summary">
+                <p><small>This will update the scenario's default parameters for future simulations.</small></p>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button 
+                className="btn-primary"
+                onClick={confirmSaveConfiguration}
+              >
+                Save Changes
+              </button>
+              <button 
+                className="btn-secondary"
+                onClick={() => setShowConfirmDialog(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </PageLayout>
   );
 };

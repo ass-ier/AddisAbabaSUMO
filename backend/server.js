@@ -1588,6 +1588,105 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
 });
 
 
+// Save scenario configuration
+app.put("/api/sumo/scenario-config", authenticateToken, requireAnyRole(["super_admin", "operator"]), async (req, res) => {
+  try {
+    const { scenario, config } = req.body;
+    
+    if (!scenario || !config) {
+      return res.status(400).json({ 
+        status: "error",
+        message: "Scenario and config are required" 
+      });
+    }
+    
+    // Validate scenario
+    const validScenarios = ["default", "rush_hour", "night", "accident"];
+    if (!validScenarios.includes(scenario)) {
+      return res.status(400).json({ 
+        status: "error",
+        message: "Invalid scenario name" 
+      });
+    }
+    
+    // Store configuration in database or file system
+    // For now, we'll store in a simple JSON file
+    const fs = require('fs');
+    const path = require('path');
+    const configPath = path.join(__dirname, 'scenario-configs.json');
+    
+    let scenarioConfigs = {};
+    try {
+      if (fs.existsSync(configPath)) {
+        scenarioConfigs = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      }
+    } catch (e) {
+      console.warn('Could not read existing scenario configs:', e.message);
+    }
+    
+    // Update the scenario configuration
+    scenarioConfigs[scenario] = {
+      ...config,
+      updatedBy: req.user.username,
+      updatedAt: new Date().toISOString()
+    };
+    
+    // Save back to file
+    fs.writeFileSync(configPath, JSON.stringify(scenarioConfigs, null, 2));
+    
+    await recordAudit(req, "save_scenario_config", scenario, { config });
+    
+    console.log(`Scenario configuration saved: ${scenario} by ${req.user.username}`);
+    
+    res.json({
+      status: "success",
+      message: `Configuration saved for ${scenario} scenario`,
+      data: scenarioConfigs[scenario]
+    });
+    
+  } catch (error) {
+    console.error('Error saving scenario configuration:', error);
+    res.status(500).json({ 
+      status: "error",
+      message: "Failed to save configuration", 
+      error: error.message 
+    });
+  }
+});
+
+// Get scenario configuration
+app.get("/api/sumo/scenario-config/:scenario", authenticateToken, async (req, res) => {
+  try {
+    const { scenario } = req.params;
+    
+    const fs = require('fs');
+    const path = require('path');
+    const configPath = path.join(__dirname, 'scenario-configs.json');
+    
+    let scenarioConfigs = {};
+    try {
+      if (fs.existsSync(configPath)) {
+        scenarioConfigs = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      }
+    } catch (e) {
+      console.warn('Could not read scenario configs:', e.message);
+    }
+    
+    res.json({
+      status: "success",
+      data: scenarioConfigs[scenario] || null
+    });
+    
+  } catch (error) {
+    console.error('Error loading scenario configuration:', error);
+    res.status(500).json({ 
+      status: "error",
+      message: "Failed to load configuration", 
+      error: error.message 
+    });
+  }
+});
+
 // Get available TLS IDs and mapping
 app.get("/api/tls/available", authenticateToken, async (req, res) => {
   try {
