@@ -145,7 +145,14 @@ module.exports = function createSumoTlsRoutes(dependencies) {
   router.get('/sumo/status', authenticateToken, async (req, res) => {
     try {
       let status = await SimulationStatus.findOne().sort({ lastUpdated: -1 });
-      if (!status) {
+      
+      // Check if existing status is missing required fields - if so, create a new one
+      if (!status || !status.name || !status.simulationId || !status.configuration?.networkFile || !status.configuration?.totalSteps) {
+        if (status) {
+          // Delete the invalid existing status
+          await SimulationStatus.deleteOne({ _id: status._id });
+        }
+        
         status = new SimulationStatus({
           name: 'Default Simulation Status',
           isRunning: false,
@@ -156,7 +163,45 @@ module.exports = function createSumoTlsRoutes(dependencies) {
           }
         });
         await status.save();
+      } else {
+        // Check actual process state and sync database status
+        const actuallyRunning = sumoSubprocess.getIsRunning();
+        const processInfo = sumoSubprocess.getProcessInfo();
+        
+        // If database says running but process is not running, update database
+        if (status.isRunning && !actuallyRunning) {
+          logger.info('SUMO process is not running but database says it is - updating status to stopped');
+          status.isRunning = false;
+          status.status = 'stopped';
+          if (!status.endTime) {
+            status.endTime = new Date();
+          }
+          status.lastUpdated = new Date();
+          await status.save();
+          
+          // Clear process reference
+          if (sumoBridgeProcessRef) {
+            sumoBridgeProcessRef.process = null;
+          }
+        }
+        // If database says stopped but process is running, update database
+        else if (!status.isRunning && actuallyRunning) {
+          logger.info('SUMO process is running but database says it is stopped - updating status to running');
+          status.isRunning = true;
+          status.status = 'running';
+          if (!status.startTime) {
+            status.startTime = new Date();
+          }
+          status.lastUpdated = new Date();
+          await status.save();
+        }
+        
+        // Add process info to response for debugging
+        status = status.toJSON();
+        status.processInfo = processInfo;
+        status.actuallyRunning = actuallyRunning;
       }
+      
       res.json(status);
     } catch (error) {
       res.status(500).json({
@@ -222,7 +267,14 @@ module.exports = function createSumoTlsRoutes(dependencies) {
       logger.info('SUMO control request received', { command: req.body.command, user: req.user?.username });
       const { command, parameters = {} } = req.body;
       let status = await SimulationStatus.findOne().sort({ lastUpdated: -1 });
-      if (!status) {
+      
+      // Check if existing status is missing required fields - if so, create a new one
+      if (!status || !status.name || !status.simulationId || !status.configuration?.networkFile || !status.configuration?.totalSteps) {
+        if (status) {
+          // Delete the invalid existing status
+          await SimulationStatus.deleteOne({ _id: status._id });
+        }
+        
         status = new SimulationStatus({
           name: 'SUMO Control Session',
           isRunning: false,
@@ -236,6 +288,25 @@ module.exports = function createSumoTlsRoutes(dependencies) {
 
       switch (command) {
         case 'start_simulation':
+          // Check if there's an orphaned process and clean it up
+          const actuallyRunning = sumoSubprocess.getIsRunning();
+          if (actuallyRunning) {
+            logger.warn('Found orphaned SUMO process - killing it before starting new simulation');
+            sumoSubprocess.kill('SIGTERM');
+            // Wait a bit for process to die
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+          
+          // Check database status vs actual process state
+          if (status.isRunning && !sumoSubprocess.getIsRunning()) {
+            logger.info('Database shows running but no actual process - resetting status');
+            status.isRunning = false;
+            status.status = 'stopped';
+            status.endTime = new Date();
+            status.lastUpdated = new Date();
+            await status.save();
+          }
+          
           if (status.isRunning) {
             return res.status(400).json({ message: 'Simulation is already running' });
           }
@@ -342,11 +413,22 @@ module.exports = function createSumoTlsRoutes(dependencies) {
                   ts: Date.now()
                 });
                 
+                // Update status to reflect error
                 status.isRunning = false;
+                status.status = 'error';
                 status.endTime = new Date();
                 status.lastUpdated = new Date();
-                await status.save();
-                io.emit('simulationStatus', status);
+                
+                try {
+                  await status.save();
+                  io.emit('simulationStatus', status);
+                  logger.info('Status updated to error in database');
+                } catch (saveError) {
+                  logger.error(`Failed to save error status: ${saveError.message}`);
+                }
+                
+                // Clear process reference
+                sumoBridgeProcessRef.process = null;
               },
               onExit: async (code, signal) => {
                 logger.info(`SUMO subprocess exited with code ${code}, signal ${signal}`);
@@ -356,11 +438,28 @@ module.exports = function createSumoTlsRoutes(dependencies) {
                   ts: Date.now()
                 });
                 
+                // Update status based on exit code and signal
                 status.isRunning = false;
+                // If terminated by signal (like SIGTERM), it's stopped, not completed
+                if (signal) {
+                  status.status = 'stopped';
+                } else {
+                  // Natural exit: completed if success (code 0), error if failed
+                  status.status = (code === 0) ? 'completed' : 'error';
+                }
                 status.endTime = new Date();
                 status.lastUpdated = new Date();
-                await status.save();
-                io.emit('simulationStatus', status);
+                
+                try {
+                  await status.save();
+                  io.emit('simulationStatus', status);
+                  logger.info(`Status updated to ${status.status} in database`);
+                } catch (saveError) {
+                  logger.error(`Failed to save exit status: ${saveError.message}`);
+                }
+                
+                // Clear process reference
+                sumoBridgeProcessRef.process = null;
               }
             });
 
@@ -378,6 +477,8 @@ module.exports = function createSumoTlsRoutes(dependencies) {
             logger.error(`Failed to spawn SUMO subprocess: ${spawnError.message}`);
             
             status.isRunning = false;
+            status.status = 'error';
+            status.endTime = new Date();
             status.lastUpdated = new Date();
             await status.save();
             io.emit('simulationStatus', status);
@@ -403,15 +504,21 @@ module.exports = function createSumoTlsRoutes(dependencies) {
           break;
 
         case 'stop_simulation':
-          if (!status.isRunning) {
+          // Check if simulation is actually running
+          const processRunning = sumoSubprocess.getIsRunning();
+          if (!status.isRunning && !processRunning) {
             return res.status(400).json({ message: 'No simulation is currently running' });
           }
 
-          // Kill SUMO subprocess
-          sumoSubprocess.kill('SIGTERM');
+          // Kill SUMO subprocess if it's running
+          if (processRunning) {
+            sumoSubprocess.kill('SIGTERM');
+          }
           sumoBridgeProcessRef.process = null;
 
+          // Update status
           status.isRunning = false;
+          status.status = 'stopped';
           status.endTime = new Date();
           status.lastUpdated = new Date();
           await status.save();
@@ -437,6 +544,8 @@ module.exports = function createSumoTlsRoutes(dependencies) {
           }
 
           status.isRunning = false;
+          status.status = 'paused';
+          status.pausedTime = new Date();
           status.lastUpdated = new Date();
           await status.save();
 
@@ -456,6 +565,8 @@ module.exports = function createSumoTlsRoutes(dependencies) {
           }
 
           status.isRunning = true;
+          status.status = 'running';
+          status.pausedTime = null;
           status.lastUpdated = new Date();
           await status.save();
 
