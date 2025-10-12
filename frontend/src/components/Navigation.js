@@ -14,7 +14,6 @@ import {
   ClipboardDocumentListIcon,
   ChartBarIcon,
   DocumentTextIcon,
-  BeakerIcon,
   SunIcon,
   MoonIcon,
   UserIcon,
@@ -257,17 +256,6 @@ const Navigation = () => {
             <span className="link-text">Reports</span>
           </Link>
 
-          <Link
-            to="/tls-test"
-            className={`sidebar-link ${isActive("/tls-test") ? "active" : ""}`}
-            onClick={closeMenu}
-            title="TLS Test Panel"
-          >
-            <span className="link-icon">
-              <BeakerIcon className="w-5 h-5" />
-            </span>
-            <span className="link-text">TLS Test</span>
-          </Link>
 
           {/* {user?.role === "super_admin" && (
             <Link

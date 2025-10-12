@@ -14,7 +14,6 @@ import TrafficMap from "./components/TrafficMap";
 import SUMOIntegration from "./components/SUMOIntegration";
 import Reports from "./components/Reports";
 import Navigation from "./components/Navigation";
-import TLSTestPanel from "./components/TLSTestPanel";
 import "./styles/App.css";
 import UsersAdmin from "./pages/UsersAdmin";
 import SystemSettings from "./pages/SystemSettings";
@@ -68,10 +67,6 @@ function AppContent() {
         <Route
           path="/reports"
           element={user ? <Reports /> : <Navigate to="/login" />}
-        />
-        <Route
-          path="/tls-test"
-          element={user ? <TLSTestPanel /> : <Navigate to="/login" />}
         />
         <Route
           path="/admin/users"

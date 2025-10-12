@@ -8,7 +8,6 @@ const EnhancedSUMOIntegration = () => {
   // Simulation State
   const [simulationStatus, setSimulationStatus] = useState({
     isRunning: false,
-    isPaused: false,
     startTime: null,
     endTime: null,
     currentStep: 0,
@@ -25,7 +24,7 @@ const EnhancedSUMOIntegration = () => {
   // Configuration State
   const [config, setConfig] = useState({
     stepLength: 1.0,
-    startWithGui: false,
+    startWithGui: true,
     maxSpeed: 13.89, // 50 km/h
     minGap: 2.5,
     accel: 2.6,
@@ -364,11 +363,7 @@ const EnhancedSUMOIntegration = () => {
       // Align with backend API: expects { command: "start_simulation" | ... }
       const commandMap = {
         start: "start_simulation",
-        pause: "pause_simulation",
-        resume: "resume_simulation",
         stop: "stop_simulation",
-        reset: "stop_simulation",
-        step: "step",
       };
       const command = commandMap[action];
       if (!command) throw new Error("Invalid action");
@@ -391,7 +386,7 @@ const EnhancedSUMOIntegration = () => {
         // Base SUMO parameters; do not include RL switches unless RL is selected
         payload.parameters = {
           stepLength: config.stepLength,
-          startWithGui: true,
+          startWithGui: config.startWithGui,
         };
 
         if (lightControlMode === "rl") {
@@ -415,18 +410,6 @@ const EnhancedSUMOIntegration = () => {
     }
   };
 
-  const openSumoGui = async () => {
-    try {
-      await axios.post(
-        "/api/sumo/open-gui",
-        { withConfig: true },
-        { withCredentials: true }
-      );
-      addLog("Opened SUMO GUI", "success");
-    } catch (e) {
-      addLog(`Failed to open SUMO GUI: ${e.message}`, "error");
-    }
-  };
 
   const handleConfigChange = (key, value) => {
     setConfig((prev) => ({ ...prev, [key]: value }));
