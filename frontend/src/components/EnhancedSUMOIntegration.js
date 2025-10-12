@@ -329,6 +329,74 @@ const EnhancedSUMOIntegration = () => {
     socketRef.current.on("trafficData", (data) => {
       setRealTimeData((prev) => ({ ...prev, ...data }));
     });
+    
+    // Listen for visualization data from SUMO bridge to update existing status fields
+    socketRef.current.on("viz", (vizData) => {
+      if (vizData && typeof vizData === 'object') {
+        // Update simulation status with current step and time from viz data
+        const currentStep = vizData.step || 0;
+        const vehicles = vizData.vehicles || [];
+        
+        // Calculate average speed for display
+        let averageSpeed = 0;
+        if (vehicles.length > 0) {
+          const totalSpeed = vehicles.reduce((sum, v) => sum + (v.speed || 0), 0);
+          averageSpeed = totalSpeed / vehicles.length;
+        }
+        
+        // Update existing simulation status fields
+        setSimulationStatus(prev => ({
+          ...prev,
+          currentStep,
+          currentTime: currentStep, // Assuming 1 step = 1 second
+        }));
+        
+        // Update all existing real-time data fields for the monitor tab
+        const runningVehicles = vehicles.filter(v => v.speed > 0.1).length;
+        const waitingVehicles = vehicles.filter(v => v.speed <= 0.1).length;
+        const teleportingVehicles = vehicles.filter(v => v.speed < 0).length; // Negative speed might indicate teleporting
+        
+        setRealTimeData(prev => {
+          // Calculate performance metrics with access to previous state
+          const collisions = 0; // SUMO would need to provide collision data
+          const emergencyStops = vehicles.filter(v => v.speed === 0 && prev.averageSpeed > 0).length;
+          
+          // Calculate fuel consumption (simple estimation based on speed and vehicle count)
+          const fuelConsumption = prev.fuelConsumption + (vehicles.length * averageSpeed * 0.001);
+          
+          // Calculate emissions (simple estimation based on fuel consumption)
+          const emissionFactor = 1.0 + (averageSpeed / 50); // Higher speeds = more emissions
+          const co2Increment = vehicles.length * emissionFactor * 0.1;
+          const coIncrement = vehicles.length * emissionFactor * 0.05;
+          const noxIncrement = vehicles.length * emissionFactor * 0.02;
+          const pmxIncrement = vehicles.length * emissionFactor * 0.01;
+          
+          return {
+            ...prev,
+            // Vehicle Statistics
+            totalVehicles: vehicles.length,
+            runningVehicles,
+            waitingVehicles,
+            teleportingVehicles,
+            
+            // Performance Metrics  
+            averageSpeed: averageSpeed * 3.6, // Convert m/s to km/h for display
+            collisions: prev.collisions + collisions,
+            emergencyStops: prev.emergencyStops + Math.max(0, emergencyStops),
+            fuelConsumption: Math.max(0, fuelConsumption),
+            
+            // Emissions (accumulative)
+            emissions: {
+              CO2: prev.emissions.CO2 + co2Increment,
+              CO: prev.emissions.CO + coIncrement,
+              NOx: prev.emissions.NOx + noxIncrement,
+              PMx: prev.emissions.PMx + pmxIncrement,
+              HC: prev.emissions.HC + (coIncrement * 0.5), // Simple HC estimation
+            },
+          };
+        });
+      }
+    });
 
     // Listen for simulation logs
     socketRef.current.on("simulationLog", (log) => {
@@ -401,6 +469,29 @@ const EnhancedSUMOIntegration = () => {
         withCredentials: true,
       });
       setSimulationStatus((prev) => ({ ...prev, ...response.data.data, mode: lightControlMode }));
+      
+      // Reset accumulative metrics when starting simulation
+      if (action === "start") {
+        setRealTimeData(prev => ({
+          ...prev,
+          totalVehicles: 0,
+          runningVehicles: 0,
+          waitingVehicles: 0,
+          teleportingVehicles: 0,
+          averageSpeed: 0,
+          collisions: 0,
+          emergencyStops: 0,
+          fuelConsumption: 0,
+          emissions: {
+            CO2: 0,
+            CO: 0,
+            HC: 0,
+            NOx: 0,
+            PMx: 0,
+          },
+        }));
+      }
+      
       addLog(`Simulation ${action} command executed successfully (${lightControlMode.toUpperCase()} control)`, "success");
     } catch (error) {
       console.error(`Error ${action}ing simulation:`, error);
