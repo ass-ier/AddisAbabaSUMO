@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import io from "socket.io-client";
 import PageLayout from "./PageLayout";
-import connectionTest from "../utils/connectionTest";
 import "./EnhancedSUMOIntegration.css";
 
 // API base URL configuration
@@ -273,8 +272,11 @@ const EnhancedSUMOIntegration = () => {
     runningVehicles: 0,
     waitingVehicles: 0,
     teleportingVehicles: 0,
+    averageWaitingTime: 0,
     collisions: 0,
     emergencyStops: 0,
+    arrivals: 0,
+    departures: 0,
     fuelConsumption: 0,
     emissions: {
       CO2: 0,
@@ -291,6 +293,7 @@ const EnhancedSUMOIntegration = () => {
   const [logs, setLogs] = useState([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [logStats, setLogStats] = useState({ total: 0, error: 0, warning: 0, info: 0, success: 0 });
   const [originalConfig, setOriginalConfig] = useState(null);
   const [scenarios] = useState([
     {
@@ -418,8 +421,11 @@ const EnhancedSUMOIntegration = () => {
             runningVehicles: 0,
             waitingVehicles: 0,
             teleportingVehicles: 0,
+            averageWaitingTime: 0,
             collisions: 0,
             emergencyStops: 0,
+            arrivals: 0,
+            departures: 0,
             fuelConsumption: 0,
             emissions: {
               CO2: 0,
@@ -468,7 +474,7 @@ const EnhancedSUMOIntegration = () => {
         // Update real-time vehicle data only if simulation is running
         setSimulationStatus(prevStatus => {
           if (prevStatus.isRunning && vehicles.length >= 0) {
-            // Calculate average speed
+            // Calculate basic vehicle metrics
             let averageSpeed = 0;
             if (vehicles.length > 0) {
               const totalSpeed = vehicles.reduce((sum, v) => sum + (v.speed || 0), 0);
@@ -477,35 +483,52 @@ const EnhancedSUMOIntegration = () => {
             
             const runningVehicles = vehicles.filter(v => v.speed > 0.1).length;
             const waitingVehicles = vehicles.filter(v => v.speed <= 0.1).length;
-            const teleportingVehicles = vehicles.filter(v => v.speed < 0).length;
+            
+            // Use real SUMO statistics if available, otherwise calculate
+            const sumoStats = vizData.stats || {};
             
             setRealTimeData(prev => {
-              const collisions = 0;
-              const emergencyStops = vehicles.filter(v => v.speed === 0 && prev.averageSpeed > 0).length;
-              const fuelConsumption = prev.fuelConsumption + (vehicles.length * averageSpeed * 0.001);
+              // Use real SUMO collision and emergency stop data
+              const stepCollisions = sumoStats.collisions || 0;
+              const stepEmergencyStops = sumoStats.emergencyStops || 0;
               
-              const emissionFactor = 1.0 + (averageSpeed / 50);
-              const co2Increment = vehicles.length * emissionFactor * 0.1;
-              const coIncrement = vehicles.length * emissionFactor * 0.05;
-              const noxIncrement = vehicles.length * emissionFactor * 0.02;
-              const pmxIncrement = vehicles.length * emissionFactor * 0.01;
+              // Calculate fuel consumption based on distance traveled (more realistic)
+              const distanceTraveledKm = (sumoStats.totalDistanceTraveled || 0) / 1000;
+              const fuelConsumption = distanceTraveledKm * 0.08; // ~8L/100km average
+              
+              // Calculate emissions based on fuel consumption (more realistic)
+              const co2FromFuel = fuelConsumption * 2.31; // kg CO2 per liter of fuel
+              const coFromFuel = fuelConsumption * 0.02;
+              const noxFromFuel = fuelConsumption * 0.01;
+              const pmxFromFuel = fuelConsumption * 0.001;
+              
+              // Calculate average waiting time per vehicle
+              const totalWaitingTime = sumoStats.waitingTime || 0;
+              const avgWaitingTime = vehicles.length > 0 ? totalWaitingTime / vehicles.length : 0;
+              
+              // Calculate throughput (arrivals and departures)
+              const stepArrivals = sumoStats.arrivals || 0;
+              const stepDepartures = sumoStats.departures || 0;
               
               return {
                 ...prev,
                 totalVehicles: vehicles.length,
                 runningVehicles,
                 waitingVehicles,
-                teleportingVehicles,
+                teleportingVehicles: sumoStats.teleportStarts || 0,
                 averageSpeed: averageSpeed * 3.6, // Convert m/s to km/h
-                collisions: prev.collisions + collisions,
-                emergencyStops: prev.emergencyStops + Math.max(0, emergencyStops),
+                averageWaitingTime: avgWaitingTime, // seconds per vehicle
+                collisions: prev.collisions + stepCollisions,
+                emergencyStops: prev.emergencyStops + stepEmergencyStops,
+                arrivals: prev.arrivals + stepArrivals,
+                departures: prev.departures + stepDepartures,
                 fuelConsumption: Math.max(0, fuelConsumption),
                 emissions: {
-                  CO2: prev.emissions.CO2 + co2Increment,
-                  CO: prev.emissions.CO + coIncrement,
-                  NOx: prev.emissions.NOx + noxIncrement,
-                  PMx: prev.emissions.PMx + pmxIncrement,
-                  HC: prev.emissions.HC + (coIncrement * 0.5),
+                  CO2: Math.max(0, co2FromFuel * 1000), // Convert to grams
+                  CO: Math.max(0, coFromFuel * 1000),
+                  NOx: Math.max(0, noxFromFuel * 1000),
+                  PMx: Math.max(0, pmxFromFuel * 1000),
+                  HC: Math.max(0, coFromFuel * 1000 * 0.3), // HC is related to CO
                 },
               };
             });
@@ -542,10 +565,33 @@ const EnhancedSUMOIntegration = () => {
 
     // Listen for simulation logs
     socketRef.current.on("simulationLog", (log) => {
-      setLogs((prev) => [
-        ...prev.slice(-99),
-        { ...log, timestamp: new Date() },
-      ]);
+      // Handle real-time logs from socket - add to local state for immediate display
+      const logEntry = {
+        id: Date.now() + Math.random(),
+        message: log.message,
+        type: log.level === 'error' ? 'error' : log.level === 'warn' ? 'warning' : 'info',
+        timestamp: new Date(),
+        username: 'System',
+        userDisplay: 'SUMO System',
+        timeAgo: 'now',
+        category: 'system_status'
+      };
+      
+      setLogs((prev) => [logEntry, ...prev.slice(0, 99)]);
+      
+      // Also send to backend for persistence (without await to avoid blocking UI)
+      try {
+        axios.post(`${API_BASE_URL}/api/sumo/logs`, {
+          message: log.message,
+          type: logEntry.type,
+          action: 'system_log'
+        }, {
+          headers: getAuthHeaders(),
+          withCredentials: true
+        }).catch(err => console.error('Failed to persist socket log:', err));
+      } catch (error) {
+        console.error('Failed to send socket log to backend:', error);
+      }
     });
     
     // Debug: Connection events
@@ -557,16 +603,23 @@ const EnhancedSUMOIntegration = () => {
       console.log('Socket disconnected from backend');
     });
 
-    // Fetch initial status
+    // Fetch initial status and logs
     fetchSimulationStatus();
+    fetchLogs();
     
     // Poll simulation status every 5 seconds - scenario preservation will handle overwrites
     const statusInterval = setInterval(() => {
       fetchSimulationStatus();
     }, 5000);
+    
+    // Fetch logs every 10 seconds
+    const logsInterval = setInterval(() => {
+      fetchLogs();
+    }, 10000);
 
     return () => {
       clearInterval(statusInterval);
+      clearInterval(logsInterval);
       if (socketRef.current) {
         socketRef.current.disconnect();
       }
@@ -627,8 +680,11 @@ const EnhancedSUMOIntegration = () => {
             runningVehicles: 0,
             waitingVehicles: 0,
             teleportingVehicles: 0,
+            averageWaitingTime: 0,
             collisions: 0,
             emergencyStops: 0,
+            arrivals: 0,
+            departures: 0,
             fuelConsumption: 0,
             emissions: {
               CO2: 0,
@@ -665,7 +721,7 @@ const EnhancedSUMOIntegration = () => {
         // Get current scenario for dynamic config selection
         const sc = simulationStatus.scenario || "default";
         console.log(`Starting ${sc} scenario with dynamic config selection`);
-        addLog(`Starting simulation with ${sc} scenario`, "info");
+      addLog(`Starting simulation with ${sc} scenario`, "info", 'start_simulation');
         
         // Base SUMO parameters; do not include RL switches unless RL is selected
         payload.parameters = {
@@ -714,8 +770,11 @@ const EnhancedSUMOIntegration = () => {
           runningVehicles: 0,
           waitingVehicles: 0,
           teleportingVehicles: 0,
+          averageWaitingTime: 0,
           collisions: 0,
           emergencyStops: 0,
+          arrivals: 0,
+          departures: 0,
           fuelConsumption: 0,
           emissions: {
             CO2: 0,
@@ -727,7 +786,7 @@ const EnhancedSUMOIntegration = () => {
         });
       }
       
-      addLog(`Simulation ${action} command executed successfully (${lightControlMode.toUpperCase()} control)`, "success");
+      addLog(`Simulation ${action} command executed successfully (${lightControlMode.toUpperCase()} control)`, "success", `${action}_simulation`);
     } catch (error) {
       console.error(`Error ${action}ing simulation:`, error);
       
@@ -740,7 +799,7 @@ const EnhancedSUMOIntegration = () => {
         errorMessage = "No response from server. Please check if the backend is running.";
       }
       
-      addLog(`Failed to ${action} simulation: ${errorMessage}`, "error");
+      addLog(`Failed to ${action} simulation: ${errorMessage}`, "error", `${action}_simulation_failed`);
     } finally {
       setIsLoading(false);
     }
@@ -764,11 +823,11 @@ const EnhancedSUMOIntegration = () => {
       if (response.data.status === 'success' && response.data.data) {
         // Use saved configuration from backend
         scenarioConfig = response.data.data;
-        addLog(`Loaded saved configuration for ${scenarioId} scenario`, "info");
+        addLog(`Loaded saved configuration for ${scenarioId} scenario`, "info", 'load_configuration');
       } else {
         // Fall back to default configuration
         scenarioConfig = scenarioConfigs[scenarioId] || scenarioConfigs.default;
-        addLog(`Loaded default configuration for ${scenarioId} scenario`, "info");
+        addLog(`Loaded default configuration for ${scenarioId} scenario`, "info", 'load_default_configuration');
       }
       
       const newConfig = { ...config, ...scenarioConfig };
@@ -784,13 +843,13 @@ const EnhancedSUMOIntegration = () => {
       setConfig(newConfig);
       setOriginalConfig(newConfig);
       setHasUnsavedChanges(false);
-      addLog(`Loaded default configuration for ${scenarioId} scenario (backend error)`, "warning");
+      addLog(`Loaded default configuration for ${scenarioId} scenario (backend error)`, "warning", 'load_configuration_error');
     }
   };
   
   const handleSaveConfiguration = () => {
     if (!hasUnsavedChanges) {
-      addLog("No changes to save", "info");
+      addLog("No changes to save", "info", 'save_configuration_no_changes');
       return;
     }
     setShowConfirmDialog(true);
@@ -813,12 +872,12 @@ const EnhancedSUMOIntegration = () => {
         setOriginalConfig({ ...config });
         setHasUnsavedChanges(false);
         setShowConfirmDialog(false);
-        addLog(`Configuration saved successfully for ${currentScenario} scenario`, "success");
+        addLog(`Configuration saved successfully for ${currentScenario} scenario`, "success", 'save_configuration');
       } else {
         throw new Error(response.data.message || 'Save failed');
       }
     } catch (error) {
-      addLog(`Failed to save configuration: ${error.response?.data?.message || error.message}`, "error");
+      addLog(`Failed to save configuration: ${error.response?.data?.message || error.message}`, "error", 'save_configuration_failed');
       setShowConfirmDialog(false);
     }
   };
@@ -826,7 +885,7 @@ const EnhancedSUMOIntegration = () => {
   const handleResetToDefaults = () => {
     const currentScenario = simulationStatus.scenario || "default";
     loadScenarioConfig(currentScenario);
-    addLog(`Configuration reset to ${currentScenario} defaults`, "info");
+    addLog(`Configuration reset to ${currentScenario} defaults`, "info", 'reset_configuration');
   };
 
   const handleScenarioChange = async (scenarioId) => {
@@ -835,36 +894,85 @@ const EnhancedSUMOIntegration = () => {
       console.log(`Scenario changed from ${simulationStatus.scenario} to ${scenarioId}`);
       setSimulationStatus((prev) => ({ ...prev, scenario: scenarioId }));
       await loadScenarioConfig(scenarioId); // Load scenario-specific configuration
-      addLog(`Scenario changed to: ${scenario.name}`, "info");
+      addLog(`Scenario changed to: ${scenario.name}`, "info", 'change_scenario');
     }
   };
 
-  // Debug connection function
-  const testConnection = async () => {
-    addLog("🔍 Starting connection diagnostics...", "info");
-    connectionTest.logConnectionInfo();
-    
-    const results = await connectionTest.runAllTests();
-    
-    // Log results to both console and UI logs
-    Object.entries(results).forEach(([test, result]) => {
-      const status = result.success ? "success" : "error";
-      addLog(`${test.toUpperCase()} Test: ${result.message}`, status);
-    });
-    
-    addLog("🔍 Connection diagnostics completed. Check browser console for details.", "info");
-  };
 
-  const addLog = (message, type = "info") => {
-    setLogs((prev) => [
-      ...prev.slice(-99),
-      {
-        id: Date.now(),
+  const addLog = async (message, type = "info", action = null) => {
+    // Add log locally for immediate UI feedback
+    const newLog = {
+      id: Date.now(),
+      message,
+      type,
+      timestamp: new Date(),
+      username: 'You', // Placeholder for immediate feedback
+      userDisplay: 'You',
+      timeAgo: 'now'
+    };
+    
+    setLogs((prev) => [newLog, ...prev.slice(0, 99)]);
+    
+    // Send log to backend for persistence
+    try {
+      await axios.post(`${API_BASE_URL}/api/sumo/logs`, {
         message,
         type,
-        timestamp: new Date(),
-      },
-    ]);
+        action
+      }, {
+        headers: getAuthHeaders(),
+        withCredentials: true
+      });
+    } catch (error) {
+      console.error('Failed to save log to backend:', error);
+      // Log will still show locally even if backend save fails
+    }
+  };
+  
+  const fetchLogs = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/sumo/logs`, {
+        headers: getAuthHeaders(),
+        withCredentials: true,
+        params: { limit: 100 }
+      });
+      
+      if (response.data.status === 'success') {
+        const { logs: fetchedLogs, total } = response.data.data;
+        setLogs(fetchedLogs || []);
+        
+        // Update log stats
+        const stats = {
+          total: total || 0,
+          info: fetchedLogs?.filter(log => log.type === 'info').length || 0,
+          success: fetchedLogs?.filter(log => log.type === 'success').length || 0,
+          warning: fetchedLogs?.filter(log => log.type === 'warning').length || 0,
+          error: fetchedLogs?.filter(log => log.type === 'error').length || 0
+        };
+        setLogStats(stats);
+      }
+    } catch (error) {
+      console.error('Failed to fetch logs:', error);
+      // Don't show error to user for background fetch failures
+    }
+  };
+  
+  const clearLogs = async () => {
+    try {
+      const response = await axios.delete(`${API_BASE_URL}/api/sumo/logs`, {
+        headers: getAuthHeaders(),
+        withCredentials: true
+      });
+      
+      if (response.data.status === 'success') {
+        setLogs([]);
+        setLogStats({ total: 0, error: 0, warning: 0, info: 0, success: 0 });
+        addLog(`${response.data.message}`, 'info', 'clear_logs');
+      }
+    } catch (error) {
+      console.error('Failed to clear logs:', error);
+      addLog('Failed to clear logs from server', 'error');
+    }
   };
 
   const formatTime = (seconds) => {
@@ -1130,6 +1238,12 @@ const EnhancedSUMOIntegration = () => {
                     </span>
                   </div>
                   <div className="metric-item">
+                    <span>Avg. Waiting Time:</span>
+                    <span className="metric-value">
+                      {realTimeData.averageWaitingTime.toFixed(1)} s
+                    </span>
+                  </div>
+                  <div className="metric-item">
                     <span>Collisions:</span>
                     <span className="metric-value error">
                       {realTimeData.collisions}
@@ -1173,6 +1287,34 @@ const EnhancedSUMOIntegration = () => {
                     <span>PMx:</span>
                     <span className="metric-value">
                       {realTimeData.emissions.PMx.toFixed(2)} g
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="metric-card">
+                  <h3>Traffic Flow</h3>
+                  <div className="metric-item">
+                    <span>Total Arrivals:</span>
+                    <span className="metric-value">
+                      {realTimeData.arrivals}
+                    </span>
+                  </div>
+                  <div className="metric-item">
+                    <span>Total Departures:</span>
+                    <span className="metric-value">
+                      {realTimeData.departures}
+                    </span>
+                  </div>
+                  <div className="metric-item">
+                    <span>Net Flow:</span>
+                    <span className="metric-value">
+                      {realTimeData.departures - realTimeData.arrivals}
+                    </span>
+                  </div>
+                  <div className="metric-item">
+                    <span>Throughput:</span>
+                    <span className="metric-value">
+                      {((realTimeData.arrivals + realTimeData.departures) / 2).toFixed(0)}
                     </span>
                   </div>
                 </div>
@@ -1393,11 +1535,15 @@ const EnhancedSUMOIntegration = () => {
             <div className="logs-panel">
               <div className="logs-header">
                 <h3>Simulation Logs</h3>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button className="btn-secondary" onClick={testConnection}>
-                    🔍 Test Connection
-                  </button>
-                  <button className="btn-secondary" onClick={() => setLogs([])}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div className="log-stats" style={{ fontSize: '12px', color: '#666', marginRight: '16px' }}>
+                    Total: {logStats.total} | 
+                    <span style={{ color: '#4CAF50', marginLeft: '4px' }}>✅ {logStats.success}</span>
+                    <span style={{ color: '#2196F3', marginLeft: '4px' }}>ℹ️ {logStats.info}</span>
+                    <span style={{ color: '#FF9800', marginLeft: '4px' }}>⚠️ {logStats.warning}</span>
+                    <span style={{ color: '#F44336', marginLeft: '4px' }}>❌ {logStats.error}</span>
+                  </div>
+                  <button className="btn-secondary" onClick={clearLogs}>
                     Clear Logs
                   </button>
                 </div>
@@ -1407,12 +1553,31 @@ const EnhancedSUMOIntegration = () => {
                   <div className="no-logs">No logs available</div>
                 ) : (
                   logs.map((log) => (
-                    <div key={log.id} className={`log-entry ${log.type}`}>
+                    <div key={log.id || log._id} className={`log-entry ${log.type} ${log.isImportant ? 'important' : ''}`}>
                       <span className="log-icon">{getLogIcon(log.type)}</span>
-                      <span className="log-time">
-                        {log.timestamp.toLocaleTimeString()}
-                      </span>
-                      <span className="log-message">{log.message}</span>
+                      <div className="log-details">
+                        <div className="log-header">
+                          <span className="log-time">
+                            {log.timeAgo || new Date(log.timestamp).toLocaleTimeString()}
+                          </span>
+                          <span className="log-user" title={`User: ${log.userDisplay || log.username || 'Unknown'}`}>
+                            👤 {log.userDisplay || log.username || 'Unknown'}
+                          </span>
+                          {log.category && (
+                            <span className="log-category" title={`Category: ${log.category}`}>
+                              #{log.category.replace('_', ' ')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="log-message">
+                          {log.message}
+                        </div>
+                        {log.action && (
+                          <div className="log-action" title={`Action: ${log.action}`}>
+                            🔧 {log.action.replace('_', ' ')}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}

@@ -17,6 +17,7 @@ const Settings = require('../models/Settings');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 const sumoSubprocess = require('../services/sumo-subprocess.service');
+const sumoLogsController = require('../controllers/sumo-logs.controller');
 
 module.exports = function createSumoTlsRoutes(dependencies) {
   const router = express.Router();
@@ -864,6 +865,23 @@ module.exports = function createSumoTlsRoutes(dependencies) {
       });
     }
   });
+
+  // ===== SUMO LOGS ROUTES =====
+  
+  // GET /api/sumo/logs - Get SUMO logs
+  router.get('/sumo/logs', authenticateToken, sumoLogsController.getLogs.bind(sumoLogsController));
+  
+  // POST /api/sumo/logs - Create SUMO log entry
+  router.post('/sumo/logs', authenticateToken, sumoLogsController.createLog.bind(sumoLogsController));
+  
+  // DELETE /api/sumo/logs - Clear SUMO logs
+  router.delete('/sumo/logs', authenticateToken, sumoLogsController.clearLogs.bind(sumoLogsController));
+  
+  // GET /api/sumo/logs/stats - Get SUMO log statistics
+  router.get('/sumo/logs/stats', authenticateToken, sumoLogsController.getLogStats.bind(sumoLogsController));
+  
+  // POST /api/sumo/logs/bulk - Bulk create SUMO logs (admin only)
+  router.post('/sumo/logs/bulk', authenticateToken, requireAnyRole(['super_admin', 'admin']), sumoLogsController.bulkCreateLogs.bind(sumoLogsController));
 
   return router;
 };

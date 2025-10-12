@@ -674,12 +674,37 @@ def main():
                 except Exception:
                     pass
 
+                # Get simulation statistics
+                try:
+                    stats = {
+                        'collisions': traci.simulation.getCollidingVehiclesNumber(),
+                        'emergencyStops': traci.simulation.getEmergencyStoppingVehiclesNumber(),
+                        'teleportStarts': traci.simulation.getStartingTeleportNumber(),
+                        'teleportEnds': traci.simulation.getEndingTeleportNumber(),
+                        'arrivals': traci.simulation.getArrivedNumber(),
+                        'departures': traci.simulation.getDepartedNumber(),
+                        'waitingTime': sum(traci.vehicle.getWaitingTime(vid) for vid in vehicle_ids),
+                        'totalDistanceTraveled': sum(traci.vehicle.getDistance(vid) for vid in vehicle_ids)
+                    }
+                except Exception:
+                    stats = {
+                        'collisions': 0,
+                        'emergencyStops': 0,
+                        'teleportStarts': 0,
+                        'teleportEnds': 0,
+                        'arrivals': 0,
+                        'departures': 0,
+                        'waitingTime': 0,
+                        'totalDistanceTraveled': 0
+                    }
+
                 payload = {
                     'type': 'viz',
                     'step': step,
                     'ts': int(time.time() * 1000),
                     'vehicles': vehicles,
-                    'tls': tls_states
+                    'tls': tls_states,
+                    'stats': stats
                 }
                 print(json.dumps(payload)); sys.stdout.flush()
 
@@ -989,12 +1014,37 @@ def main():
             except Exception:
                 pass
 
+            # Get simulation statistics
+            try:
+                stats = {
+                    'collisions': traci.simulation.getCollidingVehiclesNumber(),
+                    'emergencyStops': traci.simulation.getEmergencyStoppingVehiclesNumber(),
+                    'teleportStarts': traci.simulation.getStartingTeleportNumber(),
+                    'teleportEnds': traci.simulation.getEndingTeleportNumber(),
+                    'arrivals': traci.simulation.getArrivedNumber(),
+                    'departures': traci.simulation.getDepartedNumber(),
+                    'waitingTime': sum(traci.vehicle.getWaitingTime(vid) for vid in vehicle_ids),
+                    'totalDistanceTraveled': sum(traci.vehicle.getDistance(vid) for vid in vehicle_ids)
+                }
+            except Exception:
+                stats = {
+                    'collisions': 0,
+                    'emergencyStops': 0,
+                    'teleportStarts': 0,
+                    'teleportEnds': 0,
+                    'arrivals': 0,
+                    'departures': 0,
+                    'waitingTime': 0,
+                    'totalDistanceTraveled': 0
+                }
+
             payload = {
                 'type': 'viz',
                 'step': step,
                 'ts': int(time.time() * 1000),
                 'vehicles': vehicles,
-                'tls': tls_states
+                'tls': tls_states,
+                'stats': stats
             }
             print(json.dumps(payload))
             sys.stdout.flush()
