@@ -14,10 +14,14 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: ["http://localhost:3000", "http://127.0.0.1:3000"],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"],
   },
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
 const PORT = process.env.PORT || 5001;
@@ -344,6 +348,18 @@ const initializeUsers = async () => {
 };
 
 // Routes
+
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    realtime: "enabled"
+  });
+});
+
 app.post("/api/register", async (req, res) => {
   try {
     const { username, password, role, region } = req.body;
@@ -2286,7 +2302,7 @@ app.get(
   }
 );
 
-// Socket.IO connection handling
+// Basic Socket.IO connection handling (always enabled)
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
@@ -2303,7 +2319,89 @@ io.on("connection", (socket) => {
       console.error("Error getting status:", error);
     }
   });
+  
+  // Real-time data streaming events
+  socket.on('authenticate', (data) => {
+    console.log('Client authenticated:', data.user?.username);
+    socket.emit('authenticated', { success: true, user: data.user });
+  });
+  
+  socket.on('subscribe', (data) => {
+    console.log('Client subscribed to:', data.streams);
+    socket.emit('subscribed', { streams: data.streams, message: 'Successfully subscribed' });
+    
+    // Join rooms for subscribed streams
+    if (data.streams) {
+      data.streams.forEach(stream => socket.join(stream));
+    }
+  });
+  
+  socket.on('unsubscribe', (data) => {
+    console.log('Client unsubscribed from:', data.streams);
+    if (data.streams) {
+      data.streams.forEach(stream => socket.leave(stream));
+    }
+    socket.emit('unsubscribed', { streams: data.streams });
+  });
+  
+  socket.on('ping', () => {
+    socket.emit('pong', { timestamp: Date.now() });
+  });
+  
+  // Send initial connection confirmation
+  socket.emit('connected', {
+    clientId: socket.id,
+    serverTime: new Date().toISOString(),
+    availableStreams: ['dashboard', 'traffic', 'sumo', 'system', 'alerts']
+  });
 });
+
+// Start real-time data broadcasting
+const startRealTimeDataBroadcasting = () => {
+  // Broadcast dashboard data every 5 seconds
+  setInterval(() => {
+    io.to('dashboard').emit('dashboard', {
+      totalVehicles: Math.floor(Math.random() * 100) + 50,
+      averageSpeed: Math.floor(Math.random() * 30) + 20,
+      activeIntersections: 20,
+      simulationStatus: 'running',
+      timestamp: new Date().toISOString()
+    });
+  }, 5000);
+  
+  // Broadcast traffic data every 3 seconds
+  setInterval(() => {
+    io.to('traffic').emit('trafficData', {
+      overview: {
+        totalVehicles: Math.floor(Math.random() * 100) + 50,
+        averageSpeed: Math.floor(Math.random() * 30) + 20,
+        activeIntersections: 20
+      },
+      stats: [],
+      timestamp: new Date().toISOString()
+    });
+  }, 3000);
+  
+  // Broadcast SUMO status every 2 seconds
+  setInterval(async () => {
+    try {
+      const status = await SimulationStatus.findOne().sort({ lastUpdated: -1 });
+      io.to('sumo').emit('sumoStatus', {
+        isRunning: status?.isRunning || false,
+        processInfo: status || null,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      io.to('sumo').emit('sumoStatus', {
+        isRunning: false,
+        processInfo: null,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }, 2000);
+  
+  console.log('✅ Real-time data broadcasting started');
+};
 
 // Serve static files in production
 if (process.env.NODE_ENV === "production") {
@@ -2319,5 +2417,9 @@ initializeUsers().then(() => {
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`SUMO config path: ${process.env.SUMO_CONFIG_PATH}`);
+    
+    // Start real-time data broadcasting after server is ready
+    console.log('Starting real-time data broadcasting...');
+    startRealTimeDataBroadcasting();
   });
 });

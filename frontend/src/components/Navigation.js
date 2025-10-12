@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import "./Navigation.css";
 import NotificationsBar from "./NotificationsBar";
+import RealTimeStatus from "./RealTimeStatus";
 import {
   HomeIcon,
   VideoCameraIcon,
@@ -99,6 +100,9 @@ const Navigation = () => {
               <ExclamationTriangleIcon className="w-6 h-6" />
             </span>
             <span className="brand-text">Traffic System</span>
+          </div>
+          <div className="sidebar-status">
+            <RealTimeStatus className="px-2" showDetails={menuOpen} />
           </div>
           <button
             className="sidebar-toggle"

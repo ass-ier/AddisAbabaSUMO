@@ -1,7 +1,7 @@
 import React from "react";
 import { useAuth } from "../contexts/AuthContext";
 import SuperAdminDashboard from "./SuperAdminDashboard";
-import OperatorDashboard from "./OperatorDashboard";
+import RealTimeOperatorDashboard from "./RealTimeOperatorDashboard";
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -11,8 +11,8 @@ const Dashboard = () => {
     return <SuperAdminDashboard />;
   }
 
-  // Default dashboard for operators and analysts
-  return <OperatorDashboard />;
+  // Default dashboard for operators and analysts with real-time data
+  return <RealTimeOperatorDashboard />;
 };
 
 export default Dashboard;
