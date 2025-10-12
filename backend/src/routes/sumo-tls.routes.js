@@ -230,17 +230,28 @@ module.exports = function createSumoTlsRoutes(dependencies) {
   });
 
   // PUT /api/sumo/config - Set active SUMO config
-  router.put('/sumo/config', authenticateToken, requireAnyRole(['super_admin']), async (req, res) => {
+  router.put('/sumo/config', authenticateToken, async (req, res) => {
     try {
       const { name } = req.body || {};
+      logger.info('Setting SUMO config:', {
+        requestedConfig: name,
+        user: req.user?.username
+      });
+      
       if (!name || typeof name !== 'string' || !name.endsWith('.sumocfg')) {
+        logger.error('Invalid config name provided:', name);
         return res.status(400).json({ message: 'Invalid config name' });
       }
       
       const fullPath = path.join(DEFAULT_SUMO_CONFIG_DIR, name);
+      logger.info('Checking config file exists:', fullPath);
+      
       if (!fs.existsSync(fullPath)) {
+        logger.error('Config file not found:', fullPath);
         return res.status(404).json({ message: 'Config not found' });
       }
+      
+      logger.info('Saving SUMO config to database...');
       
       const s = await Settings.findOneAndUpdate(
         {},
@@ -253,6 +264,12 @@ module.exports = function createSumoTlsRoutes(dependencies) {
         },
         { new: true, upsert: true }
       );
+      
+      logger.info('SUMO config saved to database:', {
+        savedConfig: s?.sumo?.selectedConfig,
+        configDir: s?.sumo?.configDir,
+        fullSumoSettings: s?.sumo
+      });
       
       await auditService.record(req.user, 'set_sumo_config', name);
       res.json({ ok: true, selected: s?.sumo?.selectedConfig || name });
@@ -311,13 +328,48 @@ module.exports = function createSumoTlsRoutes(dependencies) {
             return res.status(400).json({ message: 'Simulation is already running' });
           }
 
-          // Get config
+          // Determine SUMO config path based on scenario or fallback to database settings
           let selectedConfigName = null;
-          try {
-            const s = await Settings.findOne();
-            selectedConfigName = s?.sumo?.selectedConfig || null;
-          } catch (_) {}
-          const cfgPathEffective = resolveSumoConfigPath(selectedConfigName || process.env.SUMO_CONFIG_PATH || '');
+          let cfgPathEffective = null;
+          
+          // Check if scenario is provided in parameters for dynamic config selection
+          const scenario = parameters.scenario;
+          if (scenario) {
+            // Map scenario to specific SUMO config file
+            const scenarioConfigMap = {
+              'default': 'AddisAbabaSimple.sumocfg',
+              'rush_hour': 'AddisAbabaSimple_peak.sumocfg', 
+              'night': 'AddisAbabaSimple_offpeak.sumocfg',
+              'accident': 'AddisAbabaSimple_jitter.sumocfg'
+            };
+            
+            selectedConfigName = scenarioConfigMap[scenario] || scenarioConfigMap.default;
+            cfgPathEffective = resolveSumoConfigPath(selectedConfigName);
+            
+            logger.info('Using scenario-based SUMO config:', {
+              scenario,
+              selectedConfig: selectedConfigName,
+              resolvedPath: cfgPathEffective
+            });
+          } else {
+            // Fallback to database settings or environment variable
+            try {
+              const s = await Settings.findOne();
+              selectedConfigName = s?.sumo?.selectedConfig || null;
+              logger.info('Retrieved SUMO config from database:', {
+                selectedConfig: selectedConfigName,
+                fullSettings: s?.sumo
+              });
+            } catch (err) {
+              logger.error('Failed to retrieve SUMO config from database:', err.message);
+            }
+            cfgPathEffective = resolveSumoConfigPath(selectedConfigName || process.env.SUMO_CONFIG_PATH || '');
+            logger.info('Resolved SUMO config path:', {
+              selectedConfigName,
+              envConfigPath: process.env.SUMO_CONFIG_PATH,
+              finalPath: cfgPathEffective
+            });
+          }
 
           // Get settings for GUI and step length
           let startWithGui = false;

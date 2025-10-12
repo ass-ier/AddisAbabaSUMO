@@ -12,14 +12,18 @@ const EnhancedSUMOIntegration = () => {
   // Simulation State
   const [simulationStatus, setSimulationStatus] = useState({
     isRunning: false,
+    status: 'stopped',
     startTime: null,
     endTime: null,
     currentStep: 0,
     totalSteps: 0,
     currentTime: 0,
     speed: 1.0,
+    stepLength: 1.0, // SUMO step length in seconds
     mode: "fixed", // fixed, rl (UI label only)
     scenario: "default",
+    networkFile: 'default.net.xml',
+    simulationId: null,
   });
 
   // Light control toggle: 'fixed' (SUMO default programs from net.xml) or 'rl' (PPO BestModel)
@@ -304,11 +308,6 @@ const EnhancedSUMOIntegration = () => {
       name: "Night Traffic",
       description: "Low density night simulation",
     },
-    {
-      id: "accident",
-      name: "Accident Scenario",
-      description: "Traffic simulation with accident monitoring and enhanced collision detection",
-    },
   ]);
 
   const socketRef = useRef(null);
@@ -354,19 +353,6 @@ const EnhancedSUMOIntegration = () => {
       lcSpeedGain: 0.8,
       lcKeepRight: 1.2,
     },
-    accident: {
-      stepLength: 0.5, // Smaller steps for better accident detection
-      startWithGui: true,
-      maxSpeed: 8.33, // 30 km/h (emergency speed)
-      minGap: 3.5, // Larger safety gaps
-      accel: 1.8, // Cautious acceleration
-      decel: 6.0, // Emergency braking capability
-      sigma: 0.2, // Less randomness for safety
-      lcStrategic: 0.5, // Less lane changing
-      lcCooperative: 1.5, // More cooperative
-      lcSpeedGain: 0.5,
-      lcKeepRight: 1.5,
-    },
   };
 
   // Helper function to get auth headers
@@ -378,18 +364,7 @@ const EnhancedSUMOIntegration = () => {
     };
   };
 
-  // SUMO config setter (no local state needed)
-  const setSumoConfig = async (name) => {
-    try {
-      await axios.put(`${API_BASE_URL}/api/sumo/config`, { name }, {
-        headers: getAuthHeaders(),
-        withCredentials: true
-      });
-      addLog(`SUMO config set to ${name}`, "success");
-    } catch (e) {
-      addLog(`Failed to set SUMO config: ${e.response?.data?.message || e.message}`, "error");
-    }
-  };
+  // SUMO config setter removed - now using dynamic scenario-based config selection
 
   useEffect(() => {
     // Initialize socket connection with proper configuration
@@ -401,20 +376,62 @@ const EnhancedSUMOIntegration = () => {
 
     // Listen for simulation status updates
     socketRef.current.on("simulationStatus", (status) => {
+      console.log('Received simulationStatus:', status); // Debug log
       // Safely extract only the expected properties to avoid object rendering issues
       const data = status || {};
+      const config = data.configuration || {};
+      
+      const currentStep = Number(config.currentStep) || Number(data.currentStep) || 0;
+      const stepLength = Number(config.stepLength) || 1.0; // Get step length from config
+      const currentTime = currentStep * stepLength; // Calculate SUMO simulation time
+      
+      console.log('Status update - Step:', currentStep, 'StepLength:', stepLength, 'Time:', currentTime);
+      
       const statusUpdate = {
         isRunning: Boolean(data.isRunning),
-        currentStep: Number(data.currentStep) || 0,
-        totalSteps: Number(data.totalSteps) || 0,
-        currentTime: Number(data.currentTime) || 0,
+        status: data.status || 'stopped',
+        currentStep: currentStep,
+        totalSteps: Number(config.totalSteps) || Number(data.totalSteps) || 0,
+        currentTime: currentTime, // Use calculated SUMO simulation time
         speed: Number(data.speed) || 1.0,
+        stepLength: stepLength, // Store step length for calculations
         mode: typeof data.mode === 'string' ? data.mode : 'fixed',
-        scenario: typeof data.scenario === 'string' ? data.scenario : 'default',
+        // Don't override user-selected scenario with backend data
+        // scenario: preserve existing scenario selection
         startTime: data.startTime,
-        endTime: data.endTime
+        endTime: data.endTime,
+        networkFile: config.networkFile || 'default.net.xml',
+        simulationId: data.simulationId || null
       };
-      setSimulationStatus((prev) => ({ ...prev, ...statusUpdate }));
+      
+      setSimulationStatus((prev) => {
+        console.log('Socket status update - preserving scenario:', prev.scenario);
+        
+        // Check if simulation was running but now stopped - reset metrics
+        if (!data.isRunning && prev.isRunning) {
+          console.log('Simulation stopped - resetting metrics');
+          setRealTimeData({
+            vehicleCount: 0,
+            averageSpeed: 0,
+            simulationTime: 0,
+            totalVehicles: 0,
+            runningVehicles: 0,
+            waitingVehicles: 0,
+            teleportingVehicles: 0,
+            collisions: 0,
+            emergencyStops: 0,
+            fuelConsumption: 0,
+            emissions: {
+              CO2: 0,
+              CO: 0,
+              HC: 0,
+              NOx: 0,
+              PMx: 0,
+            },
+          });
+        }
+        return { ...prev, ...statusUpdate };
+      });
     });
 
     // Listen for real-time traffic data
@@ -422,70 +439,103 @@ const EnhancedSUMOIntegration = () => {
       setRealTimeData((prev) => ({ ...prev, ...data }));
     });
     
-    // Listen for visualization data from SUMO bridge to update existing status fields
-    socketRef.current.on("viz", (vizData) => {
-      if (vizData && typeof vizData === 'object') {
-        // Update simulation status with current step and time from viz data
+    // Listen for SUMO visualization data
+    socketRef.current.on("sumoData", (vizData) => {
+      if (vizData && typeof vizData === 'object' && vizData.type === 'viz') {
+        console.log('Received sumoData:', vizData.step); // Debug log
+        
         const currentStep = vizData.step || 0;
         const vehicles = vizData.vehicles || [];
         
-        // Calculate average speed for display
-        let averageSpeed = 0;
-        if (vehicles.length > 0) {
-          const totalSpeed = vehicles.reduce((sum, v) => sum + (v.speed || 0), 0);
-          averageSpeed = totalSpeed / vehicles.length;
-        }
-        
-        // Update existing simulation status fields
-        setSimulationStatus(prev => ({
-          ...prev,
-          currentStep,
-          currentTime: currentStep, // Assuming 1 step = 1 second
-        }));
-        
-        // Update all existing real-time data fields for the monitor tab
-        const runningVehicles = vehicles.filter(v => v.speed > 0.1).length;
-        const waitingVehicles = vehicles.filter(v => v.speed <= 0.1).length;
-        const teleportingVehicles = vehicles.filter(v => v.speed < 0).length; // Negative speed might indicate teleporting
-        
-        setRealTimeData(prev => {
-          // Calculate performance metrics with access to previous state
-          const collisions = 0; // SUMO would need to provide collision data
-          const emergencyStops = vehicles.filter(v => v.speed === 0 && prev.averageSpeed > 0).length;
-          
-          // Calculate fuel consumption (simple estimation based on speed and vehicle count)
-          const fuelConsumption = prev.fuelConsumption + (vehicles.length * averageSpeed * 0.001);
-          
-          // Calculate emissions (simple estimation based on fuel consumption)
-          const emissionFactor = 1.0 + (averageSpeed / 50); // Higher speeds = more emissions
-          const co2Increment = vehicles.length * emissionFactor * 0.1;
-          const coIncrement = vehicles.length * emissionFactor * 0.05;
-          const noxIncrement = vehicles.length * emissionFactor * 0.02;
-          const pmxIncrement = vehicles.length * emissionFactor * 0.01;
-          
-          return {
-            ...prev,
-            // Vehicle Statistics
-            totalVehicles: vehicles.length,
-            runningVehicles,
-            waitingVehicles,
-            teleportingVehicles,
+        // Update simulation step and time only if simulation is running
+        setSimulationStatus(prev => {
+          if (prev.isRunning) {
+            // Calculate SUMO simulation time using step length from config
+            const stepLength = Number(prev.stepLength) || 1.0;
+            const simulationTime = currentStep * stepLength;
             
-            // Performance Metrics  
-            averageSpeed: averageSpeed * 3.6, // Convert m/s to km/h for display
-            collisions: prev.collisions + collisions,
-            emergencyStops: prev.emergencyStops + Math.max(0, emergencyStops),
-            fuelConsumption: Math.max(0, fuelConsumption),
+            console.log('sumoData update - Step:', currentStep, 'StepLength:', stepLength, 'SimTime:', simulationTime);
             
-            // Emissions (accumulative)
-            emissions: {
-              CO2: prev.emissions.CO2 + co2Increment,
-              CO: prev.emissions.CO + coIncrement,
-              NOx: prev.emissions.NOx + noxIncrement,
-              PMx: prev.emissions.PMx + pmxIncrement,
-              HC: prev.emissions.HC + (coIncrement * 0.5), // Simple HC estimation
-            },
-          };
+            return {
+              ...prev,
+              currentStep,
+              currentTime: simulationTime,
+            };
+          }
+          return prev;
+        });
+        
+        // Update real-time vehicle data only if simulation is running
+        setSimulationStatus(prevStatus => {
+          if (prevStatus.isRunning && vehicles.length >= 0) {
+            // Calculate average speed
+            let averageSpeed = 0;
+            if (vehicles.length > 0) {
+              const totalSpeed = vehicles.reduce((sum, v) => sum + (v.speed || 0), 0);
+              averageSpeed = totalSpeed / vehicles.length;
+            }
+            
+            const runningVehicles = vehicles.filter(v => v.speed > 0.1).length;
+            const waitingVehicles = vehicles.filter(v => v.speed <= 0.1).length;
+            const teleportingVehicles = vehicles.filter(v => v.speed < 0).length;
+            
+            setRealTimeData(prev => {
+              const collisions = 0;
+              const emergencyStops = vehicles.filter(v => v.speed === 0 && prev.averageSpeed > 0).length;
+              const fuelConsumption = prev.fuelConsumption + (vehicles.length * averageSpeed * 0.001);
+              
+              const emissionFactor = 1.0 + (averageSpeed / 50);
+              const co2Increment = vehicles.length * emissionFactor * 0.1;
+              const coIncrement = vehicles.length * emissionFactor * 0.05;
+              const noxIncrement = vehicles.length * emissionFactor * 0.02;
+              const pmxIncrement = vehicles.length * emissionFactor * 0.01;
+              
+              return {
+                ...prev,
+                totalVehicles: vehicles.length,
+                runningVehicles,
+                waitingVehicles,
+                teleportingVehicles,
+                averageSpeed: averageSpeed * 3.6, // Convert m/s to km/h
+                collisions: prev.collisions + collisions,
+                emergencyStops: prev.emergencyStops + Math.max(0, emergencyStops),
+                fuelConsumption: Math.max(0, fuelConsumption),
+                emissions: {
+                  CO2: prev.emissions.CO2 + co2Increment,
+                  CO: prev.emissions.CO + coIncrement,
+                  NOx: prev.emissions.NOx + noxIncrement,
+                  PMx: prev.emissions.PMx + pmxIncrement,
+                  HC: prev.emissions.HC + (coIncrement * 0.5),
+                },
+              };
+            });
+          }
+          return prevStatus;
+        });
+      }
+    });
+    
+    // Also listen for 'viz' event as backup
+    socketRef.current.on("viz", (vizData) => {
+      if (vizData && typeof vizData === 'object') {
+        console.log('Received viz data:', vizData.step); // Debug log
+        
+        const currentStep = vizData.step || 0;
+        
+        setSimulationStatus(prev => {
+          if (prev.isRunning) {
+            const stepLength = Number(prev.stepLength) || 1.0;
+            const simulationTime = currentStep * stepLength;
+            
+            console.log('viz update - Step:', currentStep, 'StepLength:', stepLength, 'SimTime:', simulationTime);
+            
+            return {
+              ...prev,
+              currentStep,
+              currentTime: simulationTime,
+            };
+          }
+          return prev;
         });
       }
     });
@@ -497,11 +547,26 @@ const EnhancedSUMOIntegration = () => {
         { ...log, timestamp: new Date() },
       ]);
     });
+    
+    // Debug: Connection events
+    socketRef.current.on('connect', () => {
+      console.log('Socket connected to backend');
+    });
+    
+    socketRef.current.on('disconnect', () => {
+      console.log('Socket disconnected from backend');
+    });
 
     // Fetch initial status
     fetchSimulationStatus();
+    
+    // Poll simulation status every 5 seconds - scenario preservation will handle overwrites
+    const statusInterval = setInterval(() => {
+      fetchSimulationStatus();
+    }, 5000);
 
     return () => {
+      clearInterval(statusInterval);
       if (socketRef.current) {
         socketRef.current.disconnect();
       }
@@ -520,20 +585,62 @@ const EnhancedSUMOIntegration = () => {
         headers: getAuthHeaders(),
         withCredentials: true
       });
-      // Safely extract only the expected properties to avoid object rendering issues
+      // Debug: Log the status response
+      console.log('Fetched simulation status:', response.data);
+      
+      // Safely extract properties from SimulationStatus model
       const data = response.data || {};
+      const config = data.configuration || {};
+      
+      const currentStep = Number(config.currentStep) || Number(data.currentStep) || 0;
+      const stepLength = Number(config.stepLength) || 1.0;
+      const currentTime = currentStep * stepLength;
+      
       const statusUpdate = {
         isRunning: Boolean(data.isRunning),
-        currentStep: Number(data.currentStep) || 0,
-        totalSteps: Number(data.totalSteps) || 0,
-        currentTime: Number(data.currentTime) || 0,
+        status: data.status || 'stopped',
+        currentStep: currentStep,
+        totalSteps: Number(config.totalSteps) || Number(data.totalSteps) || 0,
+        currentTime: currentTime,
         speed: Number(data.speed) || 1.0,
+        stepLength: stepLength,
         mode: typeof data.mode === 'string' ? data.mode : 'fixed',
-        scenario: typeof data.scenario === 'string' ? data.scenario : 'default',
+        // Don't override user-selected scenario with backend data
+        // scenario: preserve existing scenario selection
         startTime: data.startTime,
-        endTime: data.endTime
+        endTime: data.endTime,
+        networkFile: config.networkFile || 'default.net.xml',
+        simulationId: data.simulationId || null
       };
-      setSimulationStatus((prev) => ({ ...prev, ...statusUpdate }));
+      
+      setSimulationStatus((prev) => {
+        console.log('API status update - preserving scenario:', prev.scenario);
+        
+        // Reset real-time data if simulation stopped since last check
+        if (!data.isRunning && prev.isRunning) {
+          console.log('Status fetch shows simulation stopped - resetting metrics');
+          setRealTimeData({
+            vehicleCount: 0,
+            averageSpeed: 0,
+            simulationTime: 0,
+            totalVehicles: 0,
+            runningVehicles: 0,
+            waitingVehicles: 0,
+            teleportingVehicles: 0,
+            collisions: 0,
+            emergencyStops: 0,
+            fuelConsumption: 0,
+            emissions: {
+              CO2: 0,
+              CO: 0,
+              HC: 0,
+              NOx: 0,
+              PMx: 0,
+            },
+          });
+        }
+        return { ...prev, ...statusUpdate };
+      });
     } catch (error) {
       console.error("Error fetching simulation status:", error);
       addLog(`Failed to fetch simulation status: ${error.response?.data?.message || error.message}`, "error");
@@ -553,23 +660,16 @@ const EnhancedSUMOIntegration = () => {
       const command = commandMap[action];
       if (!command) throw new Error("Invalid action");
 
-      // If starting, map selected scenario to sumocfg and set it before starting
-      if (action === "start") {
-        const scenarioMap = {
-          default: "AddisAbabaSimple.sumocfg",
-          rush_hour: "AddisAbabaSimple_peak.sumocfg",
-          night: "AddisAbabaSimple_offpeak.sumocfg",
-          accident: "AddisAbabaSimple_accident.sumocfg",
-        };
-        const sc = simulationStatus.scenario || "default";
-        const cfgName = scenarioMap[sc] || scenarioMap.default;
-        await setSumoConfig(cfgName);
-      }
-
       const payload = { command, parameters: {} };
       if (action === "start") {
+        // Get current scenario for dynamic config selection
+        const sc = simulationStatus.scenario || "default";
+        console.log(`Starting ${sc} scenario with dynamic config selection`);
+        addLog(`Starting simulation with ${sc} scenario`, "info");
+        
         // Base SUMO parameters; do not include RL switches unless RL is selected
         payload.parameters = {
+          scenario: sc, // Send scenario to backend for dynamic config selection
           stepLength: config.stepLength,
           startWithGui: config.startWithGui,
         };
@@ -596,8 +696,8 @@ const EnhancedSUMOIntegration = () => {
         totalSteps: Number(responseData.totalSteps) || 0,
         currentTime: Number(responseData.currentTime) || 0,
         speed: Number(responseData.speed) || 1.0,
-        mode: lightControlMode,
-        scenario: typeof responseData.scenario === 'string' ? responseData.scenario : simulationStatus.scenario,
+        mode: lightControlMode, // Use the selected light control mode
+        scenario: simulationStatus.scenario, // Keep the selected scenario
         startTime: responseData.startTime,
         endTime: responseData.endTime
       };
@@ -605,13 +705,15 @@ const EnhancedSUMOIntegration = () => {
       
       // Reset accumulative metrics when starting simulation
       if (action === "start") {
-        setRealTimeData(prev => ({
-          ...prev,
+        console.log('Starting simulation - resetting metrics');
+        setRealTimeData({
+          vehicleCount: 0,
+          averageSpeed: 0,
+          simulationTime: 0,
           totalVehicles: 0,
           runningVehicles: 0,
           waitingVehicles: 0,
           teleportingVehicles: 0,
-          averageSpeed: 0,
           collisions: 0,
           emergencyStops: 0,
           fuelConsumption: 0,
@@ -622,7 +724,7 @@ const EnhancedSUMOIntegration = () => {
             NOx: 0,
             PMx: 0,
           },
-        }));
+        });
       }
       
       addLog(`Simulation ${action} command executed successfully (${lightControlMode.toUpperCase()} control)`, "success");
@@ -730,6 +832,7 @@ const EnhancedSUMOIntegration = () => {
   const handleScenarioChange = async (scenarioId) => {
     const scenario = scenarios.find((s) => s.id === scenarioId);
     if (scenario) {
+      console.log(`Scenario changed from ${simulationStatus.scenario} to ${scenarioId}`);
       setSimulationStatus((prev) => ({ ...prev, scenario: scenarioId }));
       await loadScenarioConfig(scenarioId); // Load scenario-specific configuration
       addLog(`Scenario changed to: ${scenario.name}`, "info");
@@ -765,24 +868,35 @@ const EnhancedSUMOIntegration = () => {
   };
 
   const formatTime = (seconds) => {
+    console.log('Formatting time for seconds:', seconds);
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
-    return `${hours.toString().padStart(2, "0")}:${minutes
+    const formatted = `${hours.toString().padStart(2, "0")}:${minutes
       .toString()
       .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    console.log('Formatted time:', formatted);
+    return formatted;
   };
 
   const getStatusColor = (status) => {
     switch (status) {
       case "running":
-        return "#4CAF50";
+        return "#4CAF50"; // Green
+      case "starting":
+        return "#2196F3"; // Blue
       case "paused":
-        return "#FF9800";
+        return "#FF9800"; // Orange
+      case "stopping":
+        return "#FF9800"; // Orange
       case "stopped":
-        return "#F44336";
+        return "#F44336"; // Red
+      case "completed":
+        return "#4CAF50"; // Green
+      case "error":
+        return "#E91E63"; // Pink/Red
       default:
-        return "#9E9E9E";
+        return "#9E9E9E"; // Grey
     }
   };
 
@@ -848,24 +962,34 @@ const EnhancedSUMOIntegration = () => {
                     <span
                       className="status-value"
                       style={{
-                        color: getStatusColor(
-                          simulationStatus.isRunning ? "running" : "stopped"
-                        ),
+                        color: getStatusColor((() => {
+                          const status = simulationStatus.status || (simulationStatus.isRunning ? "running" : "stopped");
+                          // Map statuses for consistent colors
+                          if (status === 'starting' || status === 'running') return 'running';
+                          if (status === 'completed' || status === 'stopped') return 'stopped';
+                          return status;
+                        })()),
                       }}
                     >
-                      {simulationStatus.isRunning ? "Running" : "Stopped"}
+                      {(() => {
+                        const status = simulationStatus.status || (simulationStatus.isRunning ? "running" : "stopped");
+                        // Simplify status display
+                        if (status === 'starting' || status === 'running') return 'Running';
+                        if (status === 'completed' || status === 'stopped') return 'Stopped';
+                        return status.charAt(0).toUpperCase() + status.slice(1);
+                      })()}
                     </span>
                   </div>
                   <div className="status-item">
                     <span className="status-label">Mode:</span>
                     <span className="status-value">
-                      {typeof simulationStatus.mode === 'object' ? JSON.stringify(simulationStatus.mode) : simulationStatus.mode || 'fixed'}
+                      {typeof simulationStatus.mode === 'object' ? 'fixed' : (simulationStatus.mode || 'fixed')}
                     </span>
                   </div>
                   <div className="status-item">
                     <span className="status-label">Scenario:</span>
                     <span className="status-value">
-                      {typeof simulationStatus.scenario === 'object' ? JSON.stringify(simulationStatus.scenario) : simulationStatus.scenario || 'default'}
+                      {typeof simulationStatus.scenario === 'object' ? 'default' : (simulationStatus.scenario || 'default')}
                     </span>
                   </div>
                   <div className="status-item">
@@ -877,8 +1001,7 @@ const EnhancedSUMOIntegration = () => {
                   <div className="status-item">
                     <span className="status-label">Step:</span>
                     <span className="status-value">
-                      {simulationStatus.currentStep} /{" "}
-                      {simulationStatus.totalSteps}
+                      {simulationStatus.currentStep} / {simulationStatus.totalSteps}
                     </span>
                   </div>
                   <div className="status-item">

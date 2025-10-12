@@ -202,6 +202,8 @@ dmypy.json
 *.sumocfg.backup
 sumo-gui-output/
 traci.log
+ead_out.xml
+simulation_summary.xmltripinfo.xml
 
 # Machine Learning model files
 *.h5
