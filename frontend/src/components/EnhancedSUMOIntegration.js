@@ -617,52 +617,11 @@ const EnhancedSUMOIntegration = () => {
                   ▶️ Start
                 </button>
                 <button
-                  className={`control-btn pause ${
-                    !simulationStatus.isRunning || simulationStatus.isPaused
-                      ? "disabled"
-                      : ""
-                  }`}
-                  onClick={() => handleSimulationControl("pause")}
-                  disabled={
-                    !simulationStatus.isRunning ||
-                    simulationStatus.isPaused ||
-                    isLoading
-                  }
-                >
-                  ⏸️ Pause
-                </button>
-                <button
-                  className={`control-btn resume ${
-                    !simulationStatus.isPaused ? "disabled" : ""
-                  }`}
-                  onClick={() => handleSimulationControl("resume")}
-                  disabled={!simulationStatus.isPaused || isLoading}
-                >
-                  ▶️ Resume
-                </button>
-                <button
-                  className="control-btn step"
-                  onClick={() => handleSimulationControl("step")}
-                  disabled={isLoading}
-                >
-                  ⏭️ Step
-                </button>
-                <button
                   className="control-btn stop"
                   onClick={() => handleSimulationControl("stop")}
                   disabled={!simulationStatus.isRunning || isLoading}
                 >
                   ⏹️ Stop
-                </button>
-                <button
-                  className="control-btn reset"
-                  onClick={() => handleSimulationControl("reset")}
-                  disabled={isLoading}
-                >
-                  🔄 Reset
-                </button>
-                <button className="control-btn" onClick={openSumoGui}>
-                  🖥️ Open SUMO
                 </button>
               </div>
 

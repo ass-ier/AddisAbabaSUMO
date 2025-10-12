@@ -1575,47 +1575,7 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
         });
         break;
 
-      case "pause_simulation":
-        if (!status.isRunning) {
-          return res
-            .status(400)
-            .json({ message: "No simulation is currently running" });
-        }
 
-        status.isRunning = false;
-        status.lastUpdated = new Date();
-        await status.save();
-
-        io.emit("simulationStatus", status);
-
-        await recordAudit(req, "pause_simulation", "sumo");
-        res.json({
-          status: "success",
-          message: "Simulation paused successfully",
-          data: status,
-        });
-        break;
-
-      case "resume_simulation":
-        if (status.isRunning) {
-          return res
-            .status(400)
-            .json({ message: "Simulation is already running" });
-        }
-
-        status.isRunning = true;
-        status.lastUpdated = new Date();
-        await status.save();
-
-        io.emit("simulationStatus", status);
-
-        await recordAudit(req, "resume_simulation", "sumo");
-        res.json({
-          status: "success",
-          message: "Simulation resumed successfully",
-          data: status,
-        });
-        break;
 
       default:
         res.status(400).json({ message: "Invalid command" });
@@ -1627,44 +1587,6 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
   }
 });
 
-// Open SUMO GUI application (super_admin)
-app.post(
-  "/api/sumo/open-gui",
-  authenticateToken,
-  requireAnyRole(["super_admin"]),
-  async (req, res) => {
-    try {
-      const startWithCfg = req.body?.withConfig !== false; // default true
-      // Resolve from settings or env
-      let selectedConfigName = null;
-      try {
-        const s = await Settings.findOne();
-        selectedConfigName = s?.sumo?.selectedConfig || null;
-      } catch (_) {}
-      const cfgPath = resolveSumoConfigPath(
-        selectedConfigName || process.env.SUMO_CONFIG_PATH || ""
-      );
-      const guiBinary =
-        process.env.SUMO_BINARY_GUI_PATH ||
-        (process.platform === "win32" ? "sumo-gui.exe" : "sumo-gui");
-
-      const args = [];
-      if (startWithCfg && cfgPath) {
-        args.push("-c", cfgPath);
-      }
-
-      const child = spawn(guiBinary, args, { detached: true, stdio: "ignore" });
-      child.unref();
-
-      await recordAudit(req, "open_sumo_gui", guiBinary, { args });
-      return res.json({ ok: true });
-    } catch (e) {
-      return res
-        .status(500)
-        .json({ message: "Failed to open SUMO GUI", error: e.message });
-    }
-  }
-);
 
 // Get available TLS IDs and mapping
 app.get("/api/tls/available", authenticateToken, async (req, res) => {
