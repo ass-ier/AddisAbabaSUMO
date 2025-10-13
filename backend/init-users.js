@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
 require('dotenv').config({ path: './config.env' });
 
 // Import the User model
@@ -8,88 +7,85 @@ const User = require('./src/models/User');
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/traffic_management';
 
 async function initializeUsers() {
+  let didConnect = false;
   try {
-    // Connect to MongoDB
-    await mongoose.connect(MONGODB_URI, {});
-    console.log('Connected to MongoDB');
-
-    // Check if super admin already exists
-    const existingSuperAdmin = await User.findOne({ username: 'admin' });
-    if (existingSuperAdmin) {
-      console.log('Super admin user already exists:', existingSuperAdmin.username);
-      console.log('Role:', existingSuperAdmin.role);
-      await mongoose.connection.close();
-      return;
+    // Use existing connection if available; otherwise connect
+    if (mongoose.connection.readyState !== 1) {
+      await mongoose.connect(MONGODB_URI, {});
+      didConnect = true;
+      console.log('Connected to MongoDB');
     }
 
-    // Create super admin user
-    const hashedPassword = await bcrypt.hash('admin123', 12);
-    const superAdmin = new User({
+    // Helper to ensure a user exists; create if missing
+    const ensureUser = async ({ username, password, email, firstName, lastName, role, region = 'Addis Ababa' }) => {
+      const uname = String(username || '').toLowerCase();
+      if (!uname || !password || !email || !firstName || !lastName || !role) {
+        throw new Error(`Invalid user payload for ${username}`);
+      }
+      const existing = await User.findOne({ username: uname });
+      if (existing) {
+        console.log(`User already exists: ${existing.username} (role: ${existing.role})`);
+        return existing;
+      }
+      // IMPORTANT: Do NOT pre-hash password here. Model pre-save hook will hash it.
+      const user = new User({
+        username: uname,
+        email,
+        password,
+        firstName,
+        lastName,
+        role,
+        region,
+        isActive: true,
+        isVerified: true,
+      });
+      await user.save();
+      console.log(`✅ Created user: ${uname} / ${password} (role: ${role})`);
+      return user;
+    };
+
+    // Ensure required users
+    await ensureUser({
       username: 'admin',
+      password: 'admin123',
       email: 'admin@trafficmanagement.com',
-      password: hashedPassword,
       firstName: 'Super',
       lastName: 'Admin',
       role: 'super_admin',
-      region: 'Addis Ababa',
-      isActive: true,
-      isVerified: true
     });
 
-    await superAdmin.save();
-    console.log('✅ Super admin user created successfully!');
-    console.log('Username: admin');
-    console.log('Password: admin123');
-    console.log('Email: admin@trafficmanagement.com');
-    console.log('Role: super_admin');
-
-    // Create operator user
-    const operatorPassword = await bcrypt.hash('operator123', 12);
-    const operator = new User({
-      username: 'operator',
-      email: 'operator@trafficmanagement.com',
-      password: operatorPassword,
+    await ensureUser({
+      username: 'operatornew',
+      password: 'operator123',
+      email: 'operatornew@trafficmanagement.com',
       firstName: 'System',
       lastName: 'Operator',
       role: 'operator',
-      region: 'Addis Ababa',
-      isActive: true,
-      isVerified: true
     });
 
-    await operator.save();
-    console.log('✅ Operator user created successfully!');
-    console.log('Username: operator');
-    console.log('Password: operator123');
-    console.log('Role: operator');
-
-    // Create analyst user
-    const analystPassword = await bcrypt.hash('analyst123', 12);
-    const analyst = new User({
-      username: 'analyst',
-      email: 'analyst@trafficmanagement.com',
-      password: analystPassword,
+    await ensureUser({
+      username: 'analystnew',
+      password: 'analyst123',
+      email: 'analystnew@trafficmanagement.com',
       firstName: 'Traffic',
       lastName: 'Analyst',
       role: 'analyst',
-      region: 'Addis Ababa',
-      isActive: true,
-      isVerified: true
     });
 
-    await analyst.save();
-    console.log('✅ Analyst user created successfully!');
-    console.log('Username: analyst');
-    console.log('Password: analyst123');
-    console.log('Role: analyst');
-
+    console.log('✅ User initialization complete.');
   } catch (error) {
     console.error('❌ Error initializing users:', error);
   } finally {
-    await mongoose.connection.close();
-    console.log('Database connection closed');
+    if (didConnect) {
+      await mongoose.connection.close();
+      console.log('Database connection closed');
+    }
   }
 }
 
-// Run the initialization
-initializeUsers();
+module.exports = initializeUsers;
+
+// If run directly (node init-users.js), execute and manage its own connection lifecycle
+if (require.main === module) {
+  initializeUsers();
+}

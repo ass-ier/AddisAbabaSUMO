@@ -131,11 +131,18 @@ const Login = () => {
             Super Admin: admin / admin123
           </p>
           <p
-            onClick={() => handleDemoLogin("operator", "operator123")}
+            onClick={() => handleDemoLogin("operatornew", "operator123")}
             style={{ cursor: "pointer" }}
             title="Click to use these credentials"
           >
-            Operator: operator / operator123
+            Operator: operatornew / operator123
+          </p>
+          <p
+            onClick={() => handleDemoLogin("analystnew", "analyst123")}
+            style={{ cursor: "pointer" }}
+            title="Click to use these credentials"
+          >
+            Analyst: analystnew / analyst123
           </p>
         </div>
       </div>

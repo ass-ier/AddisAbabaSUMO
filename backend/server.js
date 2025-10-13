@@ -348,38 +348,8 @@ async function recordAudit(req, action, target, meta = {}) {
   }
 }
 
-// Initialize default users
-const initializeUsers = async () => {
-  try {
-    const existingAdmin = await User.findOne({ username: "admin" });
-    if (!existingAdmin) {
-      const hashedPassword = await bcrypt.hash("admin123", 10);
-      const admin = new User({
-        username: "admin",
-        password: hashedPassword,
-        role: "super_admin",
-        region: "Addis Ababa",
-      });
-      await admin.save();
-      console.log("Default admin user created: admin/admin123");
-    }
-
-    const existingOperator = await User.findOne({ username: "operator" });
-    if (!existingOperator) {
-      const hashedPassword = await bcrypt.hash("operator123", 10);
-      const operator = new User({
-        username: "operator",
-        password: hashedPassword,
-        role: "operator",
-        region: "Addis Ababa",
-      });
-      await operator.save();
-      console.log("Default operator user created: operator/operator123");
-    }
-  } catch (error) {
-    console.error("Error initializing users:", error);
-  }
-};
+// Initialize default users via shared initializer
+const initializeUsers = require("./init-users");
 
 // Routes
 
