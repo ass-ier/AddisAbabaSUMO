@@ -1,6 +1,9 @@
 import React, { useState } from "react";
+import axios from "axios";
 import "./Reports.css";
 import PageLayout from "./PageLayout";
+
+const API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:5001";
 
 const Reports = () => {
   const [reports, setReports] = useState([]);
@@ -12,28 +15,84 @@ const Reports = () => {
     reportType: "traffic_summary",
   });
 
+  const toIsoOrNull = (val, fallbackMs) => {
+    if (val) return new Date(val).toISOString();
+    if (fallbackMs != null) return new Date(Date.now() - fallbackMs).toISOString();
+    return null;
+  };
+
+  const deterministicallySummarize = (rows, type) => {
+    const totalVehicles = rows.reduce((acc, r) => acc + (Number(r.vehicleCount) || 0), 0);
+    const avgSpeed = rows.length
+      ? Number(
+          (
+            rows.reduce((acc, r) => acc + (Number(r.averageSpeed) || 0), 0) /
+            rows.length
+          ).toFixed(1)
+        )
+      : 0;
+    const intersections = new Set(rows.map((r) => r.intersectionId || "")).size;
+    const avgFlow = rows.length
+      ? rows.reduce((a, r) => a + (Number(r.trafficFlow) || 0), 0) / rows.length
+      : 0;
+    const congestionLevel = avgFlow > 1300 ? 3 : avgFlow > 700 ? 2 : 1;
+
+    // Peak hours by summing vehicleCount per hour
+    const byHour = {};
+    for (const r of rows) {
+      const t = r.timestamp ? new Date(r.timestamp) : null;
+      if (!t) continue;
+      const hourKey = t.toISOString().slice(0, 13); // YYYY-MM-DDTHH
+      byHour[hourKey] = (byHour[hourKey] || 0) + (Number(r.vehicleCount) || 0);
+    }
+    const sortedHours = Object.entries(byHour)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([k]) => {
+        const h = k.slice(11, 13);
+        const start = `${h}:00`;
+        const end = `${h.padStart(2, "0")}:59`;
+        return `${start}-${end}`;
+      });
+
+    return {
+      totalVehicles,
+      averageSpeed: avgSpeed,
+      peakHours: sortedHours,
+      congestionLevel,
+      intersections,
+      type,
+    };
+  };
+
   const generateReport = async () => {
     setLoading(true);
     try {
-      // Simulate report generation
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      const mockReport = {
+      // Default to last 24 hours if not provided
+      const startIso = toIsoOrNull(reportFilters.startDate, 24 * 60 * 60 * 1000);
+      const endIso = toIsoOrNull(reportFilters.endDate, 0) || new Date().toISOString();
+
+      const params = new URLSearchParams();
+      if (reportFilters.intersectionId)
+        params.append("intersectionId", reportFilters.intersectionId);
+      params.append("startDate", startIso);
+      params.append("endDate", endIso);
+      params.append("limit", "5000");
+
+      const res = await axios.get(`${API_BASE}/api/traffic-data?${params.toString()}`);
+      const rows = Array.isArray(res.data) ? res.data : [];
+
+      const data = deterministicallySummarize(rows, reportFilters.reportType);
+
+      const report = {
         id: Date.now(),
         type: reportFilters.reportType,
-        title: `${reportFilters.reportType
-          .replace("_", " ")
-          .toUpperCase()} Report`,
+        title: `${reportFilters.reportType.replace("_", " ").toUpperCase()} Report`,
         generatedAt: new Date().toISOString(),
-        period: `${reportFilters.startDate} to ${reportFilters.endDate}`,
-        data: {
-          totalVehicles: Math.floor(Math.random() * 1000) + 500,
-          averageSpeed: Math.floor(Math.random() * 30) + 25,
-          peakHours: ["08:00-09:00", "17:00-18:00"],
-          congestionLevel: Math.floor(Math.random() * 3) + 1,
-          intersections: Math.floor(Math.random() * 10) + 5,
-        },
+        period: `${startIso} to ${endIso}`,
+        data,
       };
-      setReports((prev) => [mockReport, ...prev]);
+      setReports((prev) => [report, ...prev]);
     } finally {
       setLoading(false);
     }
@@ -47,11 +106,7 @@ const Reports = () => {
   };
 
   const downloadReport = (report) => {
-    const reportData = {
-      ...report,
-      downloadUrl: `/api/reports/${report.id}/download`,
-    };
-    const dataStr = JSON.stringify(reportData, null, 2);
+    const dataStr = JSON.stringify(report, null, 2);
     const dataBlob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(dataBlob);
     const link = document.createElement("a");
@@ -73,7 +128,7 @@ const Reports = () => {
   return (
     <PageLayout
       title="Reports"
-      subtitle="Generate and download traffic analysis reports"
+      subtitle="Generate and download traffic analysis reports (deterministic from persisted data)"
     >
       <div className="report-generator card shadow-card">
         <h2>Generate New Report</h2>
@@ -111,34 +166,30 @@ const Reports = () => {
           </div>
           <div className="form-row">
             <div className="form-group">
-              <label htmlFor="startDate">Start Date:</label>
+              <label htmlFor="startDate">Start Date & Time:</label>
               <input
-                type="date"
+                type="datetime-local"
                 id="startDate"
                 name="startDate"
                 value={reportFilters.startDate}
                 onChange={handleFilterChange}
-                required
               />
             </div>
             <div className="form-group">
-              <label htmlFor="endDate">End Date:</label>
+              <label htmlFor="endDate">End Date & Time:</label>
               <input
-                type="date"
+                type="datetime-local"
                 id="endDate"
                 name="endDate"
                 value={reportFilters.endDate}
                 onChange={handleFilterChange}
-                required
               />
             </div>
           </div>
           <div className="form-actions">
             <button
               onClick={generateReport}
-              disabled={
-                loading || !reportFilters.startDate || !reportFilters.endDate
-              }
+              disabled={loading}
               className="btn-primary"
             >
               {loading ? "Generating..." : "Generate Report"}
@@ -155,7 +206,7 @@ const Reports = () => {
                 <div className="report-header">
                   <h3>{report.title}</h3>
                   <span className="report-date">
-                    {new Date(report.generatedAt).toLocaleDateString()}
+                    {new Date(report.generatedAt).toLocaleString()}
                   </span>
                 </div>
                 <div className="report-info">
@@ -174,18 +225,13 @@ const Reports = () => {
                   </div>
                   <div className="data-item">
                     <span className="label">Average Speed:</span>
-                    <span className="value">
-                      {report.data.averageSpeed} km/h
-                    </span>
+                    <span className="value">{report.data.averageSpeed} km/h</span>
                   </div>
                   <div className="data-item">
                     <span className="label">Congestion Level:</span>
                     <span
                       className="value congestion"
-                      style={{
-                        color: getCongestionLevel(report.data.congestionLevel)
-                          .color,
-                      }}
+                      style={{ color: getCongestionLevel(report.data.congestionLevel).color }}
                     >
                       {getCongestionLevel(report.data.congestionLevel).text}
                     </span>
@@ -194,12 +240,15 @@ const Reports = () => {
                     <span className="label">Intersections:</span>
                     <span className="value">{report.data.intersections}</span>
                   </div>
+                  {Array.isArray(report.data.peakHours) && report.data.peakHours.length > 0 && (
+                    <div className="data-item">
+                      <span className="label">Peak Hours:</span>
+                      <span className="value">{report.data.peakHours.join(", ")}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="report-actions">
-                  <button
-                    onClick={() => downloadReport(report)}
-                    className="btn-secondary"
-                  >
+                  <button onClick={() => downloadReport(report)} className="btn-secondary">
                     Download
                   </button>
                 </div>

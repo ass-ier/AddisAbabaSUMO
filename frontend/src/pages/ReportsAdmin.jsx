@@ -34,6 +34,8 @@ export default function ReportsAdmin() {
   const [loading, setLoading] = useState(false);
   const socketRef = useRef(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [liveMode, setLiveMode] = useState(false); // when true, include realtime data
+  const [locked, setLocked] = useState(false); // when true, freeze current dataset for consistent report
 
   const fetchTraffic = async () => {
     try {
@@ -59,7 +61,8 @@ export default function ReportsAdmin() {
     socketRef.current = io(API_BASE, { transports: ["websocket"] });
     socketRef.current.on("sumoStatus", (s) => setIsRunning(!!s?.isRunning));
     socketRef.current.on("trafficData", (payload) => {
-      // If payload falls in current window, append
+      // Append only if live mode is on and report is not locked
+      if (!liveMode || locked) return;
       try {
         const t = new Date(payload.timestamp || Date.now()).toISOString();
         const startIso = start ? new Date(start).toISOString() : null;
@@ -120,7 +123,7 @@ export default function ReportsAdmin() {
       </div>
 
       {/* Date range filters */}
-      <div className="bg-white p-4 rounded shadow shadow-card grid md:grid-cols-5 gap-3 mb-4">
+      <div className="bg-white p-4 rounded shadow shadow-card grid md:grid-cols-6 gap-3 mb-4">
         <div>
           <label className="block text-xs text-gray-500 mb-1">Start</label>
           <input
@@ -140,7 +143,7 @@ export default function ReportsAdmin() {
           />
         </div>
         <div className="flex items-end gap-2">
-          <button className="btn-secondary" onClick={fetchTraffic} disabled={loading}>
+          <button className="btn-secondary" onClick={() => { setLocked(false); fetchTraffic(); }} disabled={loading}>
             {loading ? "Loading..." : "Apply"}
           </button>
           <button
@@ -150,10 +153,30 @@ export default function ReportsAdmin() {
               const e = new Date();
               setStart(new Date(s.getTime() - s.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
               setEnd(new Date(e.getTime() - e.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+              setLocked(false);
               fetchTraffic();
             }}
           >
             Last 24h
+          </button>
+        </div>
+        <div className="flex items-end gap-2">
+          <label className="inline-flex items-center gap-2 text-xs text-gray-600">
+            <input
+              type="checkbox"
+              checked={liveMode}
+              onChange={(e) => setLiveMode(e.target.checked)}
+            />
+            Live updates (include realtime data)
+          </label>
+        </div>
+        <div className="flex items-end gap-2">
+          <button
+            className="btn-secondary"
+            onClick={() => { setLocked(true); }}
+            title="Freeze the current dataset so repeated generations are identical"
+          >
+            Generate Report (Snapshot)
           </button>
         </div>
       </div>
