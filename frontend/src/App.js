@@ -119,10 +119,10 @@ function AppContent() {
           <Route
             path="/admin/reports"
             element={
-              user && (user.role === "super_admin" || user.role === "analyst" || user.role === "operator") ? (
+              user ? (
                 <ReportsAdmin />
               ) : (
-                <Navigate to="/dashboard" />
+                <Navigate to="/login" />
               )
             }
           />

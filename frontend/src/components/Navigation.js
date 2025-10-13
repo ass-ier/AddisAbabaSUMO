@@ -266,25 +266,12 @@ const Navigation = () => {
                 </span>
                 <span className="link-text">Audit</span>
               </Link>
-              <Link
-                to="/admin/reports"
-                className={`sidebar-link ${
-                  isActive("/admin/reports") ? "active" : ""
-                }`}
-                onClick={closeMenu}
-                title="Reports"
-              >
-                <span className="link-icon">
-                  <ChartBarIcon className="w-5 h-5" />
-                </span>
-                <span className="link-text">Reports</span>
-              </Link>
             </>
           )}
 
           <Link
-            to="/reports"
-            className={`sidebar-link ${isActive("/reports") ? "active" : ""}`}
+            to="/admin/reports"
+            className={`sidebar-link ${isActive("/admin/reports") ? "active" : ""}`}
             onClick={closeMenu}
             title="Reports"
           >
@@ -292,6 +279,18 @@ const Navigation = () => {
               <DocumentTextIcon className="w-5 h-5" />
             </span>
             <span className="link-text">Reports</span>
+          </Link>
+
+          <Link
+            to="/reports"
+            className={`sidebar-link ${isActive("/reports") ? "active" : ""}`}
+            onClick={closeMenu}
+            title="Basic Reports"
+          >
+            <span className="link-icon">
+              <ChartBarIcon className="w-5 h-5" />
+            </span>
+            <span className="link-text">Basic Reports</span>
           </Link>
 
           {/* {user?.role === "super_admin" && (
