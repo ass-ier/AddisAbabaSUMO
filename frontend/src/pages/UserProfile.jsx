@@ -10,6 +10,7 @@ export default function UserProfile() {
   const [saving, setSaving] = useState(false);
   const [pwd, setPwd] = useState({ newPassword: "", confirm: "" });
   const [msg, setMsg] = useState("");
+  const [mustChange, setMustChange] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -20,6 +21,7 @@ export default function UserProfile() {
         // Support both shapes: { success, data } or direct { user }
         const u = me?.data || me?.user || me;
         setUser(u || authUser || null);
+        setMustChange(!!(u?.forcePasswordChange));
       } catch (e) {
         setUser(authUser || null);
       } finally {
@@ -45,6 +47,16 @@ export default function UserProfile() {
       await api.updateCurrentUser({ password: pwd.newPassword });
       setMsg("Password updated successfully.");
       setPwd({ newPassword: "", confirm: "" });
+      setMustChange(false);
+      // Update cached user flag
+      try {
+        const stored = sessionStorage.getItem("user");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          parsed.forcePasswordChange = false;
+          sessionStorage.setItem("user", JSON.stringify(parsed));
+        }
+      } catch (_) {}
       try {
         window.dispatchEvent(
           new CustomEvent("notify", {
@@ -152,6 +164,72 @@ export default function UserProfile() {
           </form>
         </div>
       </div>
+      {mustChange && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 8,
+              width: "min(520px, 94vw)",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              padding: 20,
+            }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl">🔐</span>
+              <h3 className="text-lg font-semibold" style={{ margin: 0 }}>Set a new password</h3>
+            </div>
+            <p className="text-sm text-muted-foreground" style={{ marginTop: 0 }}>
+              Your password was reset by an administrator. Please set a new password to continue.
+            </p>
+            <form onSubmit={handlePasswordChange}>
+              <div className="grid gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">New Password</label>
+                  <input
+                    type="password"
+                    className="border p-2 w-full"
+                    minLength={6}
+                    value={pwd.newPassword}
+                    onChange={(e) => setPwd({ ...pwd, newPassword: e.target.value })}
+                    placeholder="Enter a new password"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Confirm New Password</label>
+                  <input
+                    type="password"
+                    className="border p-2 w-full"
+                    minLength={6}
+                    value={pwd.confirm}
+                    onChange={(e) => setPwd({ ...pwd, confirm: e.target.value })}
+                    placeholder="Re-enter the new password"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="mt-4" style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="submit" className="btn-primary" disabled={saving}>
+                  {saving ? "Saving..." : "Update Password"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </PageLayout>
   );
 }

@@ -98,6 +98,12 @@ const UserSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null
+  },
+
+  // Security: require user to change password after admin reset
+  forcePasswordChange: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true, // Adds createdAt and updatedAt

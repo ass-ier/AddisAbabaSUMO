@@ -4,6 +4,7 @@ import {
   Route,
   Routes,
   Navigate,
+  useLocation,
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { LoadingSpinner, ErrorBoundary } from "./components/common";
@@ -51,6 +52,15 @@ function App() {
   );
 }
 
+function ForceChangeGuard({ children }) {
+  const { user } = useAuth();
+  const location = useLocation();
+  if (user && user.forcePasswordChange && location.pathname !== "/profile") {
+    return <Navigate to="/profile" replace />;
+  }
+  return children;
+}
+
 function AppContent() {
   const { user } = useAuth();
 
@@ -62,7 +72,8 @@ function AppContent() {
       <Suspense
         fallback={<LoadingSpinner size="lg" message="Loading page..." />}
       >
-        <Routes>
+        <ForceChangeGuard>
+          <Routes>
           <Route
             path="/login"
             element={!user ? <Login /> : <Navigate to="/dashboard" />}
@@ -184,7 +195,8 @@ function AppContent() {
             path="/"
             element={<Navigate to={user ? "/dashboard" : "/login"} />}
           />
-        </Routes>
+          </Routes>
+        </ForceChangeGuard>
       </Suspense>
     </>
   );

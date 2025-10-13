@@ -34,6 +34,11 @@ const Login = () => {
 
     try {
       const user = await login(username, password);
+      // If password was reset, force change on profile page
+      if (user?.forcePasswordChange) {
+        navigate("/profile", { replace: true });
+        return;
+      }
       // Role-based redirect
       const role = user?.role;
       if (role === "super_admin") {

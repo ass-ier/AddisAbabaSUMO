@@ -190,6 +190,13 @@ class UserService {
           throw new AppError('Password must be at least 6 characters long', 400);
         }
         updates.password = await bcrypt.hash(updates.password, 10);
+        // If admin resets someone else's password, require change on next login
+        const isSelf = currentUser._id.toString() === existingUser._id.toString();
+        if (isSelf) {
+          updates.forcePasswordChange = false;
+        } else {
+          updates.forcePasswordChange = true;
+        }
       }
 
       // Business validation: check username uniqueness if changing
