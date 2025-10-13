@@ -179,7 +179,8 @@ class UserService {
       }
 
       // Business rule: Users can only update their own data (except super_admin)
-      if (currentUser.role !== 'super_admin' && currentUser._id.toString() !== id) {
+      const targetId = (id && typeof id.toString === 'function') ? id.toString() : String(id);
+      if (currentUser.role !== 'super_admin' && currentUser._id.toString() !== targetId) {
         throw new AppError('You can only update your own profile', 403);
       }
 

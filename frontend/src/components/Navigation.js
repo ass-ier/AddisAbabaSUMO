@@ -328,7 +328,12 @@ const Navigation = () => {
             </span>
           </button>
 
-          <div className="user-profile">
+          <Link
+            to="/profile"
+            className="user-profile"
+            onClick={closeMenu}
+            title="My Profile"
+          >
             <span className="link-icon">
               <UserIcon className="w-5 h-5" />
             </span>
@@ -336,7 +341,7 @@ const Navigation = () => {
               <span className="username">{user.username}</span>
               <span className="user-role">{user.role.replace("_", " ")}</span>
             </div>
-          </div>
+          </Link>
 
           <button
             className="sidebar-link logout-btn"

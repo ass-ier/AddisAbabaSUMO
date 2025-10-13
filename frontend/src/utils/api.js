@@ -44,6 +44,14 @@ export const api = {
   // Users
   listUsers: async () =>
     fetchJson(`${BASE_API}/api/users`, { headers: authHeaders() }),
+  getCurrentUser: async () =>
+    fetchJson(`${BASE_API}/api/users/me`, { headers: authHeaders() }),
+  updateCurrentUser: async (body) =>
+    fetchJson(`${BASE_API}/api/users/me`, {
+      method: "PUT",
+      headers: jsonHeaders(),
+      body: JSON.stringify(body),
+    }),
   listTeamMembers: async () =>
     fetchJson(`${BASE_API}/api/users/team`, { headers: authHeaders() }),
   createUser: async (body) =>

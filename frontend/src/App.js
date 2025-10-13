@@ -35,6 +35,7 @@ const OperatorAuditLogs = React.lazy(
 const OperatorUsers = React.lazy(
   () => import("./pages/operator/OperatorUsers")
 );
+const UserProfile = React.lazy(() => import("./pages/UserProfile"));
 
 function App() {
   return (
@@ -174,6 +175,10 @@ function AppContent() {
                 <Navigate to="/dashboard" />
               )
             }
+          />
+          <Route
+            path="/profile"
+            element={user ? <UserProfile /> : <Navigate to="/login" />}
           />
           <Route
             path="/"
