@@ -5,6 +5,11 @@ import PageLayout from "./PageLayout";
 
 const API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:5001";
 
+const getAuthHeaders = () => {
+  const token = sessionStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 const Reports = () => {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -79,10 +84,61 @@ const Reports = () => {
       params.append("endDate", endIso);
       params.append("limit", "5000");
 
-      const res = await axios.get(`${API_BASE}/api/traffic-data?${params.toString()}`);
-      const rows = Array.isArray(res.data) ? res.data : [];
+      // Fetch persisted traffic rows deterministically
+      const trafficRes = await axios.get(`${API_BASE}/api/traffic-data?${params.toString()}`, {
+        headers: getAuthHeaders(),
+        withCredentials: true,
+      });
+      const rows = Array.isArray(trafficRes.data) ? trafficRes.data : [];
 
       const data = deterministicallySummarize(rows, reportFilters.reportType);
+
+      // Emergency summary: combine current active emergencies and emergency-related audit logs in window
+      let activeCount = 0;
+      try {
+        const e = await axios.get(`${API_BASE}/api/emergencies`, {
+          headers: getAuthHeaders(),
+          withCredentials: true,
+        });
+        activeCount = Array.isArray(e.data?.items) ? e.data.items.length : 0;
+      } catch (_) {}
+
+      let emergencyEvents = 0;
+      let forceClears = 0;
+      let recentActions = [];
+      try {
+        const auditParams = new URLSearchParams();
+        auditParams.append("startDate", startIso);
+        auditParams.append("endDate", endIso);
+        auditParams.append("limit", "1000");
+        const a = await axios.get(`${API_BASE}/api/audit?${auditParams.toString()}`, {
+          headers: getAuthHeaders(),
+          withCredentials: true,
+        });
+        const items = Array.isArray(a.data?.items) ? a.data.items : a.data?.items?.items || [];
+        const emergLogs = items.filter((l) =>
+          String(l.action || "").toLowerCase().includes("emergency") || String(l.action || "") === "force_clear_emergency"
+        );
+        emergencyEvents = emergLogs.length;
+        forceClears = emergLogs.filter((l) => String(l.action) === "force_clear_emergency").length;
+        recentActions = emergLogs
+          .slice()
+          .sort((x, y) => new Date(y.time || y.timestamp || 0) - new Date(x.time || x.timestamp || 0))
+          .slice(0, 5)
+          .map((l) => ({
+            time: l.time || l.timestamp || null,
+            user: l.user || "",
+            action: l.action || "",
+            target: l.target || "",
+          }));
+      } catch (_) {}
+
+      const emergencySummary = {
+        activeCount,
+        events: emergencyEvents,
+        forceClears,
+        recentActions,
+      };
 
       const report = {
         id: Date.now(),
@@ -90,7 +146,7 @@ const Reports = () => {
         title: `${reportFilters.reportType.replace("_", " ").toUpperCase()} Report`,
         generatedAt: new Date().toISOString(),
         period: `${startIso} to ${endIso}`,
-        data,
+        data: { ...data, emergencySummary },
       };
       setReports((prev) => [report, ...prev]);
     } finally {
@@ -148,6 +204,7 @@ const Reports = () => {
                 <option value="intersection_performance">
                   Intersection Performance
                 </option>
+                <option value="emergency_summary">Emergency Summary</option>
               </select>
             </div>
             <div className="form-group">
@@ -244,6 +301,29 @@ const Reports = () => {
                     <div className="data-item">
                       <span className="label">Peak Hours:</span>
                       <span className="value">{report.data.peakHours.join(", ")}</span>
+                    </div>
+                  )}
+
+                  {report.data.emergencySummary && (
+                    <div className="data-item emergency-summary">
+                      <span className="label">Emergency Summary:</span>
+                      <div className="value">
+                        <div>Active: {report.data.emergencySummary.activeCount}</div>
+                        <div>Events: {report.data.emergencySummary.events}</div>
+                        <div>Force Clears: {report.data.emergencySummary.forceClears}</div>
+                        {Array.isArray(report.data.emergencySummary.recentActions) && report.data.emergencySummary.recentActions.length > 0 && (
+                          <div className="recent-actions">
+                            <div className="label">Recent Actions:</div>
+                            <ul>
+                              {report.data.emergencySummary.recentActions.map((a, idx) => (
+                                <li key={idx} className="text-xs text-muted-foreground">
+                                  {a.time ? new Date(a.time).toLocaleString() : "—"} · {a.user || ""} · {a.action || ""} · {a.target || ""}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
