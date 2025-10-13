@@ -1,9 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import PageLayout from "./PageLayout";
+import { useAuth } from "../contexts/AuthContext";
 import "./Dashboard.css";
 
 const SuperAdminDashboard = () => {
+  const { user } = useAuth();
+  const roleLabel =
+    user?.role === "super_admin"
+      ? "Super Admin"
+      : user?.role === "operator"
+        ? "Operator"
+        : user?.role === "analyst"
+          ? "Analyst"
+          : "User";
+
   const [stats, setStats] = useState({
     userCount: 0,
     activeSimulations: 0,
@@ -102,6 +113,7 @@ const SuperAdminDashboard = () => {
       icon: "👥",
       link: "/admin/users",
       color: "blue",
+      roles: ["super_admin"],
     },
     {
       title: "System Settings",
@@ -109,6 +121,7 @@ const SuperAdminDashboard = () => {
       icon: "⚙️",
       link: "/sumo-integration",
       color: "gray",
+      roles: ["super_admin", "operator"],
     },
     {
       title: "Audit Logs",
@@ -116,6 +129,7 @@ const SuperAdminDashboard = () => {
       icon: "📋",
       link: "/admin/audit",
       color: "green",
+      roles: ["super_admin", "analyst", "operator"],
     },
     {
       title: "System Reports",
@@ -123,6 +137,7 @@ const SuperAdminDashboard = () => {
       icon: "📊",
       link: "/admin/reports",
       color: "purple",
+      roles: ["super_admin", "analyst", "operator"],
     },
   ];
 
@@ -142,7 +157,7 @@ const SuperAdminDashboard = () => {
 
   return (
     <PageLayout
-      title="Super Admin Dashboard"
+      title={`${roleLabel} Dashboard`}
       subtitle="Complete system oversight and management"
     >
       <div className="space-y-6">
@@ -214,23 +229,25 @@ const SuperAdminDashboard = () => {
               <h3 className="text-lg font-semibold">Quick Actions</h3>
             </div>
             <div className="grid gap-3">
-              {quickActions.map((action) => (
-                <Link
-                  key={action.title}
-                  to={action.link}
-                  className={`p-4 rounded-lg border-2 border-transparent hover:border-${action.color}-200 transition-all duration-200 hover:shadow-md`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{action.icon}</span>
-                    <div>
-                      <h4 className="font-medium">{action.title}</h4>
-                      <p className="text-sm text-muted-foreground">
-                        {action.description}
-                      </p>
+              {quickActions
+                .filter((a) => !a.roles || a.roles.includes(user?.role))
+                .map((action) => (
+                  <Link
+                    key={action.title}
+                    to={action.link}
+                    className={`p-4 rounded-lg border-2 border-transparent hover:border-${action.color}-200 transition-all duration-200 hover:shadow-md`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">{action.icon}</span>
+                      <div>
+                        <h4 className="font-medium">{action.title}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {action.description}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                </Link>
-              ))}
+                  </Link>
+                ))}
             </div>
           </div>
         </div>

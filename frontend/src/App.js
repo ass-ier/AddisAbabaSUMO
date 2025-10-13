@@ -84,7 +84,13 @@ function AppContent() {
           />
           <Route
             path="/sumo-integration"
-            element={user ? <SUMOIntegration /> : <Navigate to="/login" />}
+            element={
+              user && (user.role === "super_admin" || user.role === "operator") ? (
+                <SUMOIntegration />
+              ) : (
+                <Navigate to="/dashboard" />
+              )
+            }
           />
           <Route
             path="/reports"
@@ -96,27 +102,27 @@ function AppContent() {
               user && user.role === "super_admin" ? (
                 <UsersAdmin />
               ) : (
-                <Navigate to="/login" />
+                <Navigate to="/dashboard" />
               )
             }
           />
           <Route
             path="/admin/audit"
             element={
-              user && user.role === "super_admin" ? (
+              user && (user.role === "super_admin" || user.role === "analyst" || user.role === "operator") ? (
                 <AuditLogs />
               ) : (
-                <Navigate to="/login" />
+                <Navigate to="/dashboard" />
               )
             }
           />
           <Route
             path="/admin/reports"
             element={
-              user && user.role === "super_admin" ? (
+              user && (user.role === "super_admin" || user.role === "analyst" || user.role === "operator") ? (
                 <ReportsAdmin />
               ) : (
-                <Navigate to="/login" />
+                <Navigate to="/dashboard" />
               )
             }
           />
@@ -126,7 +132,7 @@ function AppContent() {
               user && user.role === "super_admin" ? (
                 <EmergencyPanel />
               ) : (
-                <Navigate to="/login" />
+                <Navigate to="/dashboard" />
               )
             }
           />
@@ -136,7 +142,7 @@ function AppContent() {
               user && user.role !== "super_admin" ? (
                 <OperatorEmergencies />
               ) : (
-                <Navigate to="/login" />
+                <Navigate to="/dashboard" />
               )
             }
           />
@@ -146,7 +152,7 @@ function AppContent() {
               user && user.role !== "super_admin" ? (
                 <OperatorAuditLogs />
               ) : (
-                <Navigate to="/login" />
+                <Navigate to="/dashboard" />
               )
             }
           />
@@ -156,7 +162,7 @@ function AppContent() {
               user && user.role !== "super_admin" ? (
                 <OperatorUsers />
               ) : (
-                <Navigate to="/login" />
+                <Navigate to="/dashboard" />
               )
             }
           />

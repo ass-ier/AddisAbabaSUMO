@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/user.controller');
-const { authenticateToken, requireRole } = require('../middleware/auth');
+const { authenticateToken, requireRole, requireAnyRole } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 
 /**
@@ -41,11 +41,11 @@ router.get('/team', userController.getTeamMembers);
 /**
  * @route   GET /api/users/count
  * @desc    Get total user count
- * @access  Super Admin
+ * @access  Super Admin, Operator, Analyst
  */
 router.get(
   '/count',
-  requireRole('super_admin'),
+  requireAnyRole(['super_admin', 'operator', 'analyst']),
   userController.getUserCount
 );
 

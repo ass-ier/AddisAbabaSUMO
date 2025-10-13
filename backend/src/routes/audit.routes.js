@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const auditController = require('../controllers/audit.controller');
-const { authenticateToken, requireRole } = require('../middleware/auth');
+const { authenticateToken, requireRole, requireAnyRole } = require('../middleware/auth');
 
-// GET /api/audit - Get audit logs (super_admin only)
+// GET /api/audit - Get audit logs (super_admin, operator, analyst)
 router.get('/', 
   authenticateToken, 
-  requireRole('super_admin'), 
+  requireAnyRole(['super_admin', 'operator', 'analyst']), 
   auditController.getAuditLogs.bind(auditController)
 );
 

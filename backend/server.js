@@ -590,7 +590,7 @@ app.delete(
 app.get(
   "/api/users/count",
   authenticateToken,
-  requireRole("super_admin"),
+  requireAnyRole(["super_admin", "operator", "analyst"]),
   async (req, res) => {
     try {
       const cacheKey = "users_count";
@@ -715,7 +715,7 @@ app.put("/api/map/settings", authenticateToken, async (req, res) => {
 app.get(
   "/api/audit",
   authenticateToken,
-  requireRole("super_admin"),
+  requireAnyRole(["super_admin", "operator", "analyst"]),
   async (req, res) => {
     try {
       const { user, role, startDate, endDate, limit = 200 } = req.query; // Use let for query
@@ -2120,7 +2120,7 @@ app.post(
 app.get(
   "/api/stats/overview",
   authenticateToken,
-  requireAnyRole(["super_admin"]),
+  requireAnyRole(["super_admin", "operator", "analyst"]),
   async (req, res) => {
     try {
       const cacheKey = "stats_overview";
