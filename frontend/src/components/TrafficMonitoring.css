@@ -52,6 +52,57 @@
   gap: 12px;
 }
 
+/* Button styling for traffic monitoring */
+.filter-actions .btn-primary,
+.filter-actions .btn-secondary {
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.filter-actions .btn-primary {
+  background: linear-gradient(135deg, #4a6cf7 0%, #3b5bdb 100%);
+  color: white;
+}
+
+.filter-actions .btn-primary:hover {
+  background: linear-gradient(135deg, #3b5bdb 0%, #2f4bb8 100%);
+  box-shadow: 0 4px 12px rgba(74, 108, 247, 0.3);
+}
+
+.filter-actions .btn-secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.filter-actions .btn-secondary:hover {
+  background: #5a6268;
+  box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
+}
+
+/* Dark mode - Make Clear button same blue as Apply Filters */
+[data-theme="dark"] .filter-actions .btn-secondary {
+  background: linear-gradient(135deg, #4a6cf7 0%, #3b5bdb 100%);
+  color: white;
+}
+
+[data-theme="dark"] .filter-actions .btn-secondary:hover {
+  background: linear-gradient(135deg, #3b5bdb 0%, #2f4bb8 100%);
+  box-shadow: 0 4px 12px rgba(74, 108, 247, 0.4);
+}
+
+[data-theme="dark"] .filter-actions .btn-primary {
+  background: linear-gradient(135deg, #4a6cf7 0%, #3b5bdb 100%);
+}
+
+[data-theme="dark"] .filter-actions .btn-primary:hover {
+  background: linear-gradient(135deg, #3b5bdb 0%, #2f4bb8 100%);
+  box-shadow: 0 4px 12px rgba(74, 108, 247, 0.4);
+}
+
 .traffic-data-section {
   background: var(--card);
   padding: 24px;
@@ -137,29 +188,73 @@
 }
 
 .summary-card {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
-  color: #fff;
+  background: var(--card);
+  border: 2px solid var(--border);
   padding: 24px;
   border-radius: 12px;
   text-align: center;
-  transition: transform 0.2s ease;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.summary-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #4a6cf7 0%, #3b5bdb 100%);
 }
 
 .summary-card:hover {
   transform: translateY(-2px);
+  border-color: var(--primary);
+  box-shadow: 0 8px 20px rgba(74, 108, 247, 0.15);
 }
 
 .summary-card h3 {
   font-size: 14px;
   font-weight: 500;
-  margin-bottom: 8px;
-  opacity: 0.9;
+  margin-bottom: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .summary-card p {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   margin: 0;
+  color: var(--text);
+  background: linear-gradient(135deg, #4a6cf7 0%, #3b5bdb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Dark mode specific adjustments */
+[data-theme="dark"] .summary-card {
+  background: var(--hover-bg, #1e293b);
+  border-color: var(--border, #334155);
+}
+
+[data-theme="dark"] .summary-card:hover {
+  background: var(--card, #0f172a);
+  border-color: #4a6cf7;
+  box-shadow: 0 8px 20px rgba(74, 108, 247, 0.25);
+}
+
+[data-theme="dark"] .summary-card h3 {
+  color: var(--text-secondary, #94a3b8);
+}
+
+[data-theme="dark"] .summary-card p {
+  background: linear-gradient(135deg, #6b8aff 0%, #5c7cfa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 @media (max-width: 768px) {
