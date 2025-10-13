@@ -129,10 +129,10 @@ function AppContent() {
           <Route
             path="/admin/emergencies"
             element={
-              user && user.role === "super_admin" ? (
+              user ? (
                 <EmergencyPanel />
               ) : (
-                <Navigate to="/dashboard" />
+                <Navigate to="/login" />
               )
             }
           />

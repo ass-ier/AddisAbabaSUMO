@@ -93,8 +93,15 @@ module.exports = function createSumoTlsRoutes(dependencies) {
         return res.status(500).json({ message: 'Failed to send command to bridge' });
       }
       
-      await auditService.record(req.user, 'tls_state_control', tls_id, { phase, actualTlsId });
-      return res.json({ ok: true, tls_id, phase, actualTlsId });
+      // Attach current simulationId for grouping logs by simulation
+      let simId = null;
+      try {
+        const latest = await SimulationStatus.findOne().sort({ lastUpdated: -1 });
+        simId = latest?.simulationId || null;
+      } catch (_) {}
+      
+      await auditService.record(req.user, 'tls_state_control', tls_id, { phase, actualTlsId, simulationId: simId, outcome: 'sent' });
+      return res.json({ ok: true, tls_id, phase, actualTlsId, simulationId: simId });
     } catch (error) {
       res.status(500).json({ message: 'Server error', error: error.message });
     }
@@ -133,8 +140,15 @@ module.exports = function createSumoTlsRoutes(dependencies) {
         return res.status(500).json({ message: 'Failed to send command to bridge' });
       }
       
-      await auditService.record(req.user, 'tls_phase_control', tls_id, { action, phaseIndex, actualTlsId });
-      return res.json({ ok: true, tls_id, actualTlsId, action, phaseIndex });
+      // Attach current simulationId for grouping logs by simulation
+      let simId = null;
+      try {
+        const latest = await SimulationStatus.findOne().sort({ lastUpdated: -1 });
+        simId = latest?.simulationId || null;
+      } catch (_) {}
+      
+      await auditService.record(req.user, 'tls_phase_control', tls_id, { action, phaseIndex, actualTlsId, simulationId: simId, outcome: 'sent' });
+      return res.json({ ok: true, tls_id, actualTlsId, action, phaseIndex, simulationId: simId });
     } catch (error) {
       res.status(500).json({ message: 'Server error', error: error.message });
     }
