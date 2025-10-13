@@ -116,8 +116,13 @@ UserSchema.index({ role: 1 });
 UserSchema.index({ isActive: 1 });
 UserSchema.index({ createdAt: -1 });
 
-// Pre-save middleware to hash password
+// Pre-save middleware to normalize username and hash password
 UserSchema.pre('save', async function(next) {
+  // Normalize username to lowercase
+  if (this.isModified('username')) {
+    this.username = this.username.toLowerCase();
+  }
+  
   // Only hash the password if it has been modified (or is new)
   if (!this.isModified('password')) return next();
   

@@ -28,13 +28,13 @@ class UserService {
         throw new AppError('Password must be at least 6 characters long', 400);
       }
 
-      // Business logic: hash password
-      const hashedPassword = await bcrypt.hash(userData.password, 10);
+      // Business logic: do not hash here; let the model pre-save hook hash
+      const normalizedUsername = userData.username.toLowerCase();
 
-      // Create user with hashed password
+      // Create user with raw password; pre-save hook will hash
       const user = await userRepository.create({
         ...userData,
-        password: hashedPassword
+        username: normalizedUsername
       });
 
       // Invalidate users cache

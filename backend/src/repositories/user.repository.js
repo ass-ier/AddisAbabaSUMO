@@ -29,7 +29,7 @@ class UserRepository {
    */
   async findByUsername(username, includePassword = false) {
     try {
-      const query = User.findOne({ username });
+      const query = User.findOne({ username: username.toLowerCase() });
       if (!includePassword) {
         query.select('-password');
       }
@@ -170,7 +170,7 @@ class UserRepository {
    */
   async exists(username) {
     try {
-      const count = await User.countDocuments({ username });
+      const count = await User.countDocuments({ username: username.toLowerCase() });
       return count > 0;
     } catch (error) {
       logger.error('UserRepository.exists error:', error);
