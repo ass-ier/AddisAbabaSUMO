@@ -1,4 +1,4 @@
-import io from 'socket.io-client';
+import io from "socket.io-client";
 
 class WebSocketService {
   constructor() {
@@ -18,107 +18,108 @@ class WebSocketService {
    */
   connect() {
     if (this.socket?.connected) {
-      console.log('WebSocket already connected');
+      console.log("WebSocket already connected");
       return Promise.resolve();
     }
 
-    const serverUrl = process.env.REACT_APP_SERVER_URL || 'http://localhost:5001';
-    
-    console.log('Connecting to WebSocket server:', serverUrl);
+    const serverUrl =
+      process.env.REACT_APP_SERVER_URL || "http://localhost:5001";
+
+    console.log("Connecting to WebSocket server:", serverUrl);
 
     this.socket = io(serverUrl, {
       withCredentials: true,
-      transports: ['websocket', 'polling'],
+      transports: ["websocket", "polling"],
       timeout: 20000,
       forceNew: true,
-      autoConnect: true
+      autoConnect: true,
     });
 
     return new Promise((resolve, reject) => {
       // Connection successful
-      this.socket.on('connect', () => {
-        console.log('✅ WebSocket connected:', this.socket.id);
+      this.socket.on("connect", () => {
+        console.log("✅ WebSocket connected:", this.socket.id);
         this.connected = true;
         this.reconnectAttempts = 0;
         this.connectionLost = false;
         this.startHeartbeat();
-        
+
         // Trigger connection callback
-        this.triggerEvent('connected', { clientId: this.socket.id });
+        this.triggerEvent("connected", { clientId: this.socket.id });
         resolve();
       });
 
       // Connection confirmation from server
-      this.socket.on('connected', (data) => {
-        console.log('Server confirmed connection:', data);
-        this.triggerEvent('server-connected', data);
+      this.socket.on("connected", (data) => {
+        console.log("Server confirmed connection:", data);
+        this.triggerEvent("server-connected", data);
       });
 
       // Authentication events
-      this.socket.on('authenticated', (data) => {
-        console.log('Authentication result:', data);
-        this.triggerEvent('authenticated', data);
+      this.socket.on("authenticated", (data) => {
+        console.log("Authentication result:", data);
+        this.triggerEvent("authenticated", data);
       });
 
       // Subscription events
-      this.socket.on('subscribed', (data) => {
-        console.log('Successfully subscribed to streams:', data.streams);
-        this.triggerEvent('subscribed', data);
+      this.socket.on("subscribed", (data) => {
+        console.log("Successfully subscribed to streams:", data.streams);
+        this.triggerEvent("subscribed", data);
       });
 
-      this.socket.on('unsubscribed', (data) => {
-        console.log('Successfully unsubscribed from streams:', data.streams);
-        this.triggerEvent('unsubscribed', data);
+      this.socket.on("unsubscribed", (data) => {
+        console.log("Successfully unsubscribed from streams:", data.streams);
+        this.triggerEvent("unsubscribed", data);
       });
 
       // Real-time data events
-      this.socket.on('dashboard', (data) => {
-        this.triggerEvent('dashboard', data);
+      this.socket.on("dashboard", (data) => {
+        this.triggerEvent("dashboard", data);
       });
 
-      this.socket.on('systemMetrics', (data) => {
-        this.triggerEvent('systemMetrics', data);
+      this.socket.on("systemMetrics", (data) => {
+        this.triggerEvent("systemMetrics", data);
       });
 
-      this.socket.on('trafficData', (data) => {
-        this.triggerEvent('trafficData', data);
+      this.socket.on("trafficData", (data) => {
+        this.triggerEvent("trafficData", data);
       });
 
-      this.socket.on('alerts', (data) => {
-        this.triggerEvent('alerts', data);
+      this.socket.on("alerts", (data) => {
+        this.triggerEvent("alerts", data);
       });
 
-      this.socket.on('sumoStatus', (data) => {
-        this.triggerEvent('sumoStatus', data);
+      this.socket.on("sumoStatus", (data) => {
+        this.triggerEvent("sumoStatus", data);
       });
 
       // Error handling
-      this.socket.on('connect_error', (error) => {
-        console.error('WebSocket connection error:', error);
+      this.socket.on("connect_error", (error) => {
+        console.error("WebSocket connection error:", error);
         this.connected = false;
-        this.triggerEvent('error', error);
-        
+        this.triggerEvent("error", error);
+
         if (this.reconnectAttempts === 0) {
           reject(error);
         }
       });
 
       // Disconnection handling
-      this.socket.on('disconnect', (reason) => {
-        console.warn('WebSocket disconnected:', reason);
+      this.socket.on("disconnect", (reason) => {
+        console.warn("WebSocket disconnected:", reason);
         this.connected = false;
         this.connectionLost = true;
         this.stopHeartbeat();
-        this.triggerEvent('disconnected', { reason });
-        
+        this.triggerEvent("disconnected", { reason });
+
         // Auto-reconnect logic
-        if (reason !== 'io client disconnect') {
+        if (reason !== "io client disconnect") {
           this.attemptReconnect();
         }
       });
 
       // Heartbeat response
-      this.socket.on('pong', (data) => {
+      this.socket.on("pong", (data) => {
         // Connection is healthy
         this.connectionLost = false;
       });
@@ -126,7 +127,7 @@ class WebSocketService {
       // Set connection timeout
       setTimeout(() => {
         if (!this.connected) {
-          reject(new Error('Connection timeout'));
+          reject(new Error("Connection timeout"));
         }
       }, 10000);
     });
@@ -137,12 +138,12 @@ class WebSocketService {
    */
   authenticate(user) {
     if (!this.socket || !this.connected) {
-      console.warn('Cannot authenticate: not connected');
+      console.warn("Cannot authenticate: not connected");
       return;
     }
 
-    console.log('Authenticating user:', user.username);
-    this.socket.emit('authenticate', { user });
+    console.log("Authenticating user:", user.username);
+    this.socket.emit("authenticate", { user });
   }
 
   /**
@@ -150,15 +151,15 @@ class WebSocketService {
    */
   subscribe(streams = []) {
     if (!this.socket || !this.connected) {
-      console.warn('Cannot subscribe: not connected');
+      console.warn("Cannot subscribe: not connected");
       return;
     }
 
-    console.log('Subscribing to streams:', streams);
-    this.socket.emit('subscribe', { streams });
-    
+    console.log("Subscribing to streams:", streams);
+    this.socket.emit("subscribe", { streams });
+
     // Store subscriptions
-    streams.forEach(stream => {
+    streams.forEach((stream) => {
       this.subscriptions.set(stream, true);
     });
   }
@@ -168,15 +169,15 @@ class WebSocketService {
    */
   unsubscribe(streams = []) {
     if (!this.socket || !this.connected) {
-      console.warn('Cannot unsubscribe: not connected');
+      console.warn("Cannot unsubscribe: not connected");
       return;
     }
 
-    console.log('Unsubscribing from streams:', streams);
-    this.socket.emit('unsubscribe', { streams });
-    
+    console.log("Unsubscribing from streams:", streams);
+    this.socket.emit("unsubscribe", { streams });
+
     // Remove subscriptions
-    streams.forEach(stream => {
+    streams.forEach((stream) => {
       this.subscriptions.delete(stream);
     });
   }
@@ -196,7 +197,7 @@ class WebSocketService {
    */
   off(event, callback) {
     if (!this.listeners.has(event)) return;
-    
+
     const callbacks = this.listeners.get(event);
     const index = callbacks.indexOf(callback);
     if (index > -1) {
@@ -209,8 +210,8 @@ class WebSocketService {
    */
   triggerEvent(event, data) {
     if (!this.listeners.has(event)) return;
-    
-    this.listeners.get(event).forEach(callback => {
+
+    this.listeners.get(event).forEach((callback) => {
       try {
         callback(data);
       } catch (error) {
@@ -229,13 +230,13 @@ class WebSocketService {
 
     this.heartbeatInterval = setInterval(() => {
       if (this.socket && this.connected) {
-        this.socket.emit('ping');
-        
+        this.socket.emit("ping");
+
         // If no pong received in 10 seconds, consider connection lost
         setTimeout(() => {
           if (this.connectionLost) {
-            console.warn('Heartbeat failed - connection may be lost');
-            this.triggerEvent('connection-lost', {});
+            console.warn("Heartbeat failed - connection may be lost");
+            this.triggerEvent("connection-lost", {});
           }
         }, 10000);
       }
@@ -257,19 +258,21 @@ class WebSocketService {
    */
   attemptReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
-      this.triggerEvent('reconnect-failed', {});
+      console.error("Max reconnection attempts reached");
+      this.triggerEvent("reconnect-failed", {});
       return;
     }
 
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-    
-    console.log(`Attempting to reconnect... (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${delay}ms`);
-    
+
+    console.log(
+      `Attempting to reconnect... (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${delay}ms`
+    );
+
     setTimeout(() => {
-      this.connect().catch(error => {
-        console.error('Reconnection failed:', error);
+      this.connect().catch((error) => {
+        console.error("Reconnection failed:", error);
         this.attemptReconnect();
       });
     }, delay);
@@ -279,15 +282,15 @@ class WebSocketService {
    * Disconnect from server
    */
   disconnect() {
-    console.log('Disconnecting from WebSocket server');
-    
+    console.log("Disconnecting from WebSocket server");
+
     this.stopHeartbeat();
-    
+
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
     }
-    
+
     this.connected = false;
     this.subscriptions.clear();
     this.listeners.clear();
@@ -316,7 +319,7 @@ class WebSocketService {
       socketId: this.socket?.id,
       subscriptions: this.getSubscriptions(),
       reconnectAttempts: this.reconnectAttempts,
-      connectionLost: this.connectionLost
+      connectionLost: this.connectionLost,
     };
   }
 }

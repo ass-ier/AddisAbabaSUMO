@@ -23,8 +23,15 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
+    "test:coverage": "react-scripts test --coverage --watchAll=false",
     "eject": "react-scripts eject",
-    "dev": "react-scripts start"
+    "dev": "react-scripts start",
+    "lint": "eslint src/**/*.{js,jsx}",
+    "lint:fix": "eslint src/**/*.{js,jsx} --fix",
+    "format": "prettier --write \"src/**/*.{js,jsx,css,json}\"",
+    "format:check": "prettier --check \"src/**/*.{js,jsx,css,json}\"",
+    "analyze": "source-map-explorer 'build/static/js/*.js'",
+    "prepare": "husky"
   },
   "eslintConfig": {
     "extends": [
@@ -45,9 +52,28 @@
     ]
   },
   "proxy": "http://localhost:5001",
+  "lint-staged": {
+    "src/**/*.{js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "src/**/*.{css,json}": [
+      "prettier --write"
+    ]
+  },
   "devDependencies": {
     "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.4",
     "postcss": "^8.4.35",
-    "tailwindcss": "^3.4.14"
+    "prettier": "^3.6.2",
+    "source-map-explorer": "^2.5.3",
+    "tailwindcss": "^3.4.14",
+    "webpack-bundle-analyzer": "^4.10.2"
   }
 }

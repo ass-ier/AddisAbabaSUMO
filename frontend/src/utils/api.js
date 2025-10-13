@@ -8,7 +8,12 @@ async function fetchJson(url, options = {}) {
       if (isJson) {
         const err = await res.json();
         // Backend may return error text under different keys depending on implementation
-        const message = err?.message || err?.error || err?.errors || err?.msg || `${res.status} ${res.statusText}`;
+        const message =
+          err?.message ||
+          err?.error ||
+          err?.errors ||
+          err?.msg ||
+          `${res.status} ${res.statusText}`;
         throw new Error(message);
       } else {
         const text = await res.text();
@@ -37,7 +42,8 @@ const BASE_API = process.env.REACT_APP_API_BASE || "http://localhost:5001";
 
 export const api = {
   // Users
-  listUsers: async () => fetchJson(`${BASE_API}/api/users`, { headers: authHeaders() }),
+  listUsers: async () =>
+    fetchJson(`${BASE_API}/api/users`, { headers: authHeaders() }),
   createUser: async (body) =>
     fetchJson(`${BASE_API}/api/users`, {
       method: "POST",
@@ -51,7 +57,10 @@ export const api = {
       body: JSON.stringify(body),
     }),
   deleteUser: async (id) =>
-    fetchJson(`${BASE_API}/api/users/${id}`, { method: "DELETE", headers: authHeaders() }),
+    fetchJson(`${BASE_API}/api/users/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    }),
 
   // Settings
   getSettings: async () =>

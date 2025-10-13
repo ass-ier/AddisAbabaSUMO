@@ -8,29 +8,25 @@
 
     <input>
         <!-- Network file with traffic lights already configured -->
-        <net-file value="AddisAbaba.net.xml" />
+        <net-file value="C:/GitHub/AddisAbaba/AddisAbabaSUMO/frontend/public/Sumoconfigs/AddisAbaba.net.xml" />
 
-        <!-- Route definitions with realistic traffic flows -->
-        <route-files value="addisTrafficFullNetwork.rou.xml" />
+        <!-- Route definitions with minimal traffic for testing -->
+        <route-files value="C:/GitHub/AddisAbaba/AddisAbabaSUMO/frontend/public/Sumoconfigs/AddisAbabaNetEditConfig.rou.xml" />
 
-        <!-- Vehicle type definitions with distinctive colors and Lane Detectors -->
-        <additional-files value="vehicleTypesFixed.add.xml, detectors.add.xml" />
+        <!-- Vehicle type definitions with distinctive colors -->
+        <additional-files value="C:/GitHub/AddisAbaba/AddisAbabaSUMO/frontend/public/Sumoconfigs/vehicleTypesFixed.add.xml" />
 
     </input>
 
     <output>
-        <!-- Main simulation output -->
-        <summary-output value="simulation_summary.xml" />
-
-        <!-- Trip info for analysis -->
-        <tripinfo-output value="tripinfo.xml" />
+        <!-- Best Practice: Minimal outputs for large networks to save memory -->
     </output>
 
     <time>
         <!-- Simulation time settings -->
-        <!-- 0-7200 seconds = 2 hours morning peak (7:00-9:00 AM) -->
+        <!-- Best Practice: Start with shorter simulation for large networks -->
         <begin value="0" />
-        <end value="7200" />
+        <end value="600" />
         <step-length value="1.0" />
     </time>
 
@@ -39,6 +35,15 @@
         <ignore-route-errors value="true" />
         <time-to-teleport value="300" />
         <collision.action value="warn" />
+        
+        <!-- Best Practice: Memory optimization for large networks -->
+        <no-internal-links value="true" />
+        
+        <!-- Best Practice: Use mesoscopic simulation for large networks -->
+        <!-- This significantly reduces memory usage -->
+        <mesosim value="true" />
+        <meso-junction-control value="true" />
+        <meso-tls-penalty value="0.5" />
     </processing>
 
     <routing>
@@ -48,9 +53,12 @@
     </routing>
 
     <report>
-        <!-- Basic reporting settings -->
-        <verbose value="true" />
+        <!-- Best Practice: Minimal reporting for large networks -->
+        <verbose value="false" />
         <no-step-log value="true" />
+        <no-warnings value="true" />
+        <aggregate-warnings value="10" />
+        <duration-log.disable value="true" />
     </report>
 
     <random_number>

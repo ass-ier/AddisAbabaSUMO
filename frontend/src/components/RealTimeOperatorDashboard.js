@@ -16,7 +16,7 @@ const RealTimeOperatorDashboard = () => {
     trafficData,
     sumoStatus,
     lastUpdate,
-    connect
+    connect,
   } = useDashboardData();
 
   const [stats, setStats] = useState({
@@ -43,7 +43,7 @@ const RealTimeOperatorDashboard = () => {
     },
     {
       id: 2,
-      type: "Warning", 
+      type: "Warning",
       message: "High congestion detected at 2nd Avenue",
       timestamp: "15 minutes ago",
       status: "warning",
@@ -72,8 +72,10 @@ const RealTimeOperatorDashboard = () => {
       const newStats = {
         totalVehicles: dashboardData.totalVehicles || stats.totalVehicles,
         averageSpeed: dashboardData.averageSpeed || stats.averageSpeed,
-        activeIntersections: dashboardData.activeIntersections || stats.activeIntersections,
-        simulationStatus: dashboardData.simulationStatus || stats.simulationStatus,
+        activeIntersections:
+          dashboardData.activeIntersections || stats.activeIntersections,
+        simulationStatus:
+          dashboardData.simulationStatus || stats.simulationStatus,
       };
       setStats(newStats);
       setLoading(false);
@@ -84,11 +86,12 @@ const RealTimeOperatorDashboard = () => {
   useEffect(() => {
     if (trafficData?.overview) {
       const overview = trafficData.overview;
-      setStats(prevStats => ({
+      setStats((prevStats) => ({
         ...prevStats,
         totalVehicles: overview.totalVehicles || prevStats.totalVehicles,
         averageSpeed: overview.averageSpeed || prevStats.averageSpeed,
-        activeIntersections: overview.activeIntersections || prevStats.activeIntersections,
+        activeIntersections:
+          overview.activeIntersections || prevStats.activeIntersections,
       }));
     }
   }, [trafficData]);
@@ -96,7 +99,7 @@ const RealTimeOperatorDashboard = () => {
   // Update simulation status from SUMO data
   useEffect(() => {
     if (sumoStatus) {
-      setStats(prevStats => ({
+      setStats((prevStats) => ({
         ...prevStats,
         simulationStatus: sumoStatus.isRunning ? "running" : "stopped",
       }));
@@ -106,7 +109,7 @@ const RealTimeOperatorDashboard = () => {
   // Fallback: fetch initial data if real-time connection fails
   useEffect(() => {
     if (!connected && !connecting && error) {
-      console.log('Real-time connection failed, falling back to HTTP requests');
+      console.log("Real-time connection failed, falling back to HTTP requests");
       fetchDashboardData();
     }
   }, [connected, connecting, error]);
@@ -206,7 +209,9 @@ const RealTimeOperatorDashboard = () => {
       <PageLayout title="Dashboard" subtitle="Loading...">
         <div className="flex items-center justify-center h-64">
           <div className="loading">
-            {connecting ? "Connecting to real-time data..." : "Loading dashboard data..."}
+            {connecting
+              ? "Connecting to real-time data..."
+              : "Loading dashboard data..."}
           </div>
         </div>
       </PageLayout>
@@ -220,19 +225,23 @@ const RealTimeOperatorDashboard = () => {
     >
       <div className="space-y-6">
         {/* Connection Status Banner */}
-        <div className={`p-3 rounded-lg border ${
-          connected 
-            ? 'bg-green-50 border-green-200' 
-            : error 
-              ? 'bg-red-50 border-red-200'
-              : 'bg-yellow-50 border-yellow-200'
-        }`}>
+        <div
+          className={`p-3 rounded-lg border ${
+            connected
+              ? "bg-green-50 border-green-200"
+              : error
+                ? "bg-red-50 border-red-200"
+                : "bg-yellow-50 border-yellow-200"
+          }`}
+        >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               {connected ? (
                 <>
                   <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-green-800 font-medium">Real-time data connected</span>
+                  <span className="text-green-800 font-medium">
+                    Real-time data connected
+                  </span>
                   {lastUpdate && (
                     <span className="text-green-600 text-sm">
                       • Last update: {new Date(lastUpdate).toLocaleTimeString()}
@@ -242,13 +251,17 @@ const RealTimeOperatorDashboard = () => {
               ) : connecting ? (
                 <>
                   <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
-                  <span className="text-yellow-800 font-medium">Connecting to real-time data...</span>
+                  <span className="text-yellow-800 font-medium">
+                    Connecting to real-time data...
+                  </span>
                 </>
               ) : (
                 <>
                   <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                  <span className="text-red-800 font-medium">Real-time connection unavailable</span>
-                  <button 
+                  <span className="text-red-800 font-medium">
+                    Real-time connection unavailable
+                  </span>
+                  <button
                     onClick={connect}
                     className="ml-2 px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
                   >
@@ -258,7 +271,9 @@ const RealTimeOperatorDashboard = () => {
               )}
             </div>
             {connected && (
-              <span className="text-green-600 text-sm">🔄 Live Updates Active</span>
+              <span className="text-green-600 text-sm">
+                🔄 Live Updates Active
+              </span>
             )}
           </div>
         </div>
@@ -274,7 +289,10 @@ const RealTimeOperatorDashboard = () => {
                       {stat.title}
                     </p>
                     {stat.realTime && (
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="Real-time data"></div>
+                      <div
+                        className="w-2 h-2 bg-green-500 rounded-full animate-pulse"
+                        title="Real-time data"
+                      ></div>
                     )}
                   </div>
                   <p className="text-2xl font-bold">{stat.value}</p>
@@ -293,7 +311,10 @@ const RealTimeOperatorDashboard = () => {
               <span className="text-2xl">📋</span>
               <h3 className="text-lg font-semibold">Recent Alerts</h3>
               {connected && (
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="Real-time updates"></div>
+                <div
+                  className="w-2 h-2 bg-green-500 rounded-full animate-pulse"
+                  title="Real-time updates"
+                ></div>
               )}
             </div>
             <div className="space-y-4">
@@ -338,12 +359,18 @@ const RealTimeOperatorDashboard = () => {
               <span className="text-2xl">⚙️</span>
               <h3 className="text-lg font-semibold">System Metrics</h3>
               {connected && (
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="Real-time updates"></div>
+                <div
+                  className="w-2 h-2 bg-green-500 rounded-full animate-pulse"
+                  title="Real-time updates"
+                ></div>
               )}
             </div>
             <div className="space-y-4">
               {systemMetrics.map((metric) => (
-                <div key={metric.name} className="flex items-center justify-between">
+                <div
+                  key={metric.name}
+                  className="flex items-center justify-between"
+                >
                   <span className="text-sm font-medium">{metric.name}</span>
                   <div className="flex items-center space-x-2">
                     <div className="w-32 bg-gray-200 rounded-full h-2">
@@ -352,8 +379,8 @@ const RealTimeOperatorDashboard = () => {
                           metric.status === "online"
                             ? "bg-green-500"
                             : metric.status === "warning"
-                            ? "bg-yellow-500"
-                            : "bg-red-500"
+                              ? "bg-yellow-500"
+                              : "bg-red-500"
                         }`}
                         style={{ width: `${metric.value}%` }}
                       ></div>
@@ -387,7 +414,7 @@ const RealTimeOperatorDashboard = () => {
                 </p>
               </div>
             </Link>
-            
+
             <Link
               to="/sumo-integration"
               className="flex items-center p-4 border rounded-lg hover:bg-gray-50 transition-colors"
@@ -400,7 +427,7 @@ const RealTimeOperatorDashboard = () => {
                 </p>
               </div>
             </Link>
-            
+
             <Link
               to="/reports"
               className="flex items-center p-4 border rounded-lg hover:bg-gray-50 transition-colors"

@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import websocketService from '../services/websocketService';
-import { useAuth } from '../contexts/AuthContext';
+import { useState, useEffect, useCallback } from "react";
+import websocketService from "../services/websocketService";
+import { useAuth } from "../contexts/AuthContext";
 
 /**
  * Custom hook for real-time data using WebSocket
@@ -19,17 +19,17 @@ export const useRealTimeData = (streams = [], options = {}) => {
   const {
     autoConnect = true,
     retryOnError = true,
-    updateInterval = null
+    updateInterval = null,
   } = options;
 
   // Handle real-time data updates
   const handleDataUpdate = useCallback((eventType, newData) => {
-    setData(prevData => ({
+    setData((prevData) => ({
       ...prevData,
       [eventType]: {
         ...newData,
-        receivedAt: new Date().toISOString()
-      }
+        receivedAt: new Date().toISOString(),
+      },
     }));
     setLastUpdate(new Date().toISOString());
   }, []);
@@ -45,7 +45,7 @@ export const useRealTimeData = (streams = [], options = {}) => {
 
   // Handle errors
   const handleError = useCallback((error) => {
-    console.error('WebSocket error:', error);
+    console.error("WebSocket error:", error);
     setError(error);
     setConnecting(false);
   }, []);
@@ -53,7 +53,7 @@ export const useRealTimeData = (streams = [], options = {}) => {
   // Connect to WebSocket
   const connect = useCallback(async () => {
     if (websocketService.isConnected()) {
-      console.log('Already connected to WebSocket');
+      console.log("Already connected to WebSocket");
       return;
     }
 
@@ -62,8 +62,8 @@ export const useRealTimeData = (streams = [], options = {}) => {
 
     try {
       await websocketService.connect();
-      console.log('WebSocket connected successfully');
-      
+      console.log("WebSocket connected successfully");
+
       // Authenticate if user is available
       if (user) {
         websocketService.authenticate(user);
@@ -73,9 +73,8 @@ export const useRealTimeData = (streams = [], options = {}) => {
       if (streams.length > 0) {
         websocketService.subscribe(streams);
       }
-
     } catch (error) {
-      console.error('Failed to connect to WebSocket:', error);
+      console.error("Failed to connect to WebSocket:", error);
       setError(error);
       setConnecting(false);
     }
@@ -111,32 +110,32 @@ export const useRealTimeData = (streams = [], options = {}) => {
     const onError = (error) => handleError(error);
 
     // Data events
-    const onDashboard = (data) => handleDataUpdate('dashboard', data);
-    const onSystemMetrics = (data) => handleDataUpdate('systemMetrics', data);
-    const onTrafficData = (data) => handleDataUpdate('trafficData', data);
-    const onAlerts = (data) => handleDataUpdate('alerts', data);
-    const onSumoStatus = (data) => handleDataUpdate('sumoStatus', data);
+    const onDashboard = (data) => handleDataUpdate("dashboard", data);
+    const onSystemMetrics = (data) => handleDataUpdate("systemMetrics", data);
+    const onTrafficData = (data) => handleDataUpdate("trafficData", data);
+    const onAlerts = (data) => handleDataUpdate("alerts", data);
+    const onSumoStatus = (data) => handleDataUpdate("sumoStatus", data);
 
     // Register event listeners
-    websocketService.on('connected', onConnected);
-    websocketService.on('disconnected', onDisconnected);
-    websocketService.on('error', onError);
-    websocketService.on('dashboard', onDashboard);
-    websocketService.on('systemMetrics', onSystemMetrics);
-    websocketService.on('trafficData', onTrafficData);
-    websocketService.on('alerts', onAlerts);
-    websocketService.on('sumoStatus', onSumoStatus);
+    websocketService.on("connected", onConnected);
+    websocketService.on("disconnected", onDisconnected);
+    websocketService.on("error", onError);
+    websocketService.on("dashboard", onDashboard);
+    websocketService.on("systemMetrics", onSystemMetrics);
+    websocketService.on("trafficData", onTrafficData);
+    websocketService.on("alerts", onAlerts);
+    websocketService.on("sumoStatus", onSumoStatus);
 
     // Cleanup event listeners on unmount
     return () => {
-      websocketService.off('connected', onConnected);
-      websocketService.off('disconnected', onDisconnected);
-      websocketService.off('error', onError);
-      websocketService.off('dashboard', onDashboard);
-      websocketService.off('systemMetrics', onSystemMetrics);
-      websocketService.off('trafficData', onTrafficData);
-      websocketService.off('alerts', onAlerts);
-      websocketService.off('sumoStatus', onSumoStatus);
+      websocketService.off("connected", onConnected);
+      websocketService.off("disconnected", onDisconnected);
+      websocketService.off("error", onError);
+      websocketService.off("dashboard", onDashboard);
+      websocketService.off("systemMetrics", onSystemMetrics);
+      websocketService.off("trafficData", onTrafficData);
+      websocketService.off("alerts", onAlerts);
+      websocketService.off("sumoStatus", onSumoStatus);
     };
   }, [handleConnectionChange, handleError, handleDataUpdate]);
 
@@ -162,10 +161,14 @@ export const useRealTimeData = (streams = [], options = {}) => {
   useEffect(() => {
     if (websocketService.isConnected() && streams.length > 0) {
       const currentSubscriptions = websocketService.getSubscriptions();
-      
+
       // Find streams to add and remove
-      const toAdd = streams.filter(stream => !currentSubscriptions.includes(stream));
-      const toRemove = currentSubscriptions.filter(stream => !streams.includes(stream));
+      const toAdd = streams.filter(
+        (stream) => !currentSubscriptions.includes(stream)
+      );
+      const toRemove = currentSubscriptions.filter(
+        (stream) => !streams.includes(stream)
+      );
 
       if (toAdd.length > 0) {
         websocketService.subscribe(toAdd);
@@ -185,25 +188,25 @@ export const useRealTimeData = (streams = [], options = {}) => {
     // Data
     data,
     lastUpdate,
-    
+
     // Connection status
     connected,
     connecting,
     error,
-    
+
     // Actions
     connect,
     disconnect,
     subscribe,
     unsubscribe,
     getConnectionInfo,
-    
+
     // Convenience getters for specific data types
     dashboardData: data.dashboard,
     systemMetrics: data.systemMetrics,
     trafficData: data.trafficData,
     alerts: data.alerts,
-    sumoStatus: data.sumoStatus
+    sumoStatus: data.sumoStatus,
   };
 };
 
@@ -211,35 +214,35 @@ export const useRealTimeData = (streams = [], options = {}) => {
  * Hook specifically for dashboard data
  */
 export const useDashboardData = (options = {}) => {
-  return useRealTimeData(['dashboard', 'traffic', 'sumo'], options);
+  return useRealTimeData(["dashboard", "traffic", "sumo"], options);
 };
 
 /**
  * Hook specifically for system monitoring
  */
 export const useSystemMetrics = (options = {}) => {
-  return useRealTimeData(['system'], options);
+  return useRealTimeData(["system"], options);
 };
 
 /**
  * Hook specifically for traffic data
  */
 export const useTrafficData = (options = {}) => {
-  return useRealTimeData(['traffic'], options);
+  return useRealTimeData(["traffic"], options);
 };
 
 /**
  * Hook specifically for alerts
  */
 export const useAlerts = (options = {}) => {
-  return useRealTimeData(['alerts'], options);
+  return useRealTimeData(["alerts"], options);
 };
 
 /**
  * Hook specifically for SUMO status
  */
 export const useSumoStatus = (options = {}) => {
-  return useRealTimeData(['sumo'], options);
+  return useRealTimeData(["sumo"], options);
 };
 
 export default useRealTimeData;

@@ -1,14 +1,14 @@
-import React from 'react';
-import { useRealTimeData } from '../hooks/useRealTimeData';
+import React from "react";
+import { useRealTimeData } from "../hooks/useRealTimeData";
 
-const RealTimeStatus = ({ className = '', showDetails = false }) => {
-  const { 
-    connected, 
-    connecting, 
-    error, 
+const RealTimeStatus = ({ className = "", showDetails = false }) => {
+  const {
+    connected,
+    connecting,
+    error,
     lastUpdate,
     getConnectionInfo,
-    connect
+    connect,
   } = useRealTimeData([], { autoConnect: false });
 
   const connectionInfo = getConnectionInfo();
@@ -18,21 +18,21 @@ const RealTimeStatus = ({ className = '', showDetails = false }) => {
   }
 
   const getStatusColor = () => {
-    if (connected) return 'text-green-600';
-    if (connecting) return 'text-yellow-600';
-    return 'text-red-600';
+    if (connected) return "text-green-600";
+    if (connecting) return "text-yellow-600";
+    return "text-red-600";
   };
 
   const getStatusIcon = () => {
-    if (connected) return '🟢';
-    if (connecting) return '🟡';
-    return '🔴';
+    if (connected) return "🟢";
+    if (connecting) return "🟡";
+    return "🔴";
   };
 
   const getStatusText = () => {
-    if (connected) return 'Real-time';
-    if (connecting) return 'Connecting...';
-    return 'Offline';
+    if (connected) return "Real-time";
+    if (connecting) return "Connecting...";
+    return "Offline";
   };
 
   return (
@@ -51,7 +51,7 @@ const RealTimeStatus = ({ className = '', showDetails = false }) => {
               • Updated {new Date(lastUpdate).toLocaleTimeString()}
             </span>
           )}
-          
+
           {error && !connecting && (
             <button
               onClick={connect}
@@ -71,8 +71,8 @@ const RealTimeStatus = ({ className = '', showDetails = false }) => {
       )}
 
       {connected && (
-        <div 
-          className="w-2 h-2 bg-green-500 rounded-full animate-pulse" 
+        <div
+          className="w-2 h-2 bg-green-500 rounded-full animate-pulse"
           title="Live data updates active"
         />
       )}

@@ -71,14 +71,14 @@ export default function UsersAdmin() {
       }
 
       setForm({
-        firstName: "", 
-        lastName: "", 
-        username: "", 
-        email: "", 
-        password: "", 
-        role: "operator", 
-        region: "", 
-        phoneNumber: "" 
+        firstName: "",
+        lastName: "",
+        username: "",
+        email: "",
+        password: "",
+        role: "operator",
+        region: "",
+        phoneNumber: "",
       });
       setMessage("User created successfully");
       // If we appended above, we've already updated the UI. Otherwise load() was called.
@@ -92,8 +92,8 @@ export default function UsersAdmin() {
 
   const filtered = users.filter(
     (u) =>
-      !filter || 
-      u.username.includes(filter) || 
+      !filter ||
+      u.username.includes(filter) ||
       (u.role || "").includes(filter) ||
       (u.email || "").toLowerCase().includes(filter.toLowerCase()) ||
       (u.firstName || "").toLowerCase().includes(filter.toLowerCase()) ||
@@ -104,7 +104,7 @@ export default function UsersAdmin() {
   const getRoleBadge = (role) => {
     const roleColors = {
       operator: "#4CAF50",
-      analyst: "#FF9800", 
+      analyst: "#FF9800",
       super_admin: "#9C27B0",
     };
 
@@ -173,7 +173,9 @@ export default function UsersAdmin() {
                 id="firstName"
                 placeholder="Enter first name"
                 value={form.firstName}
-                onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, firstName: e.target.value })
+                }
                 required
               />
             </div>
@@ -259,7 +261,9 @@ export default function UsersAdmin() {
                 id="phoneNumber"
                 placeholder="Enter phone number (optional)"
                 value={form.phoneNumber}
-                onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, phoneNumber: e.target.value })
+                }
               />
             </div>
 
@@ -303,15 +307,21 @@ export default function UsersAdmin() {
                   <tbody>
                     {filtered.map((userData) => (
                       <tr key={userData._id}>
-                        <td>{userData.firstName} {userData.lastName}</td>
+                        <td>
+                          {userData.firstName} {userData.lastName}
+                        </td>
                         <td>{userData.username}</td>
                         <td>{userData.email}</td>
                         <td>
                           <select
                             className="role-select"
                             value={userData.role}
-                            onChange={(e) => updateRole(userData._id, e.target.value)}
-                            style={{ backgroundColor: roleColors[userData.role] }}
+                            onChange={(e) =>
+                              updateRole(userData._id, e.target.value)
+                            }
+                            style={{
+                              backgroundColor: roleColors[userData.role],
+                            }}
                           >
                             <option value="operator">Operator</option>
                             <option value="analyst">Analyst</option>
@@ -320,10 +330,14 @@ export default function UsersAdmin() {
                         </td>
                         <td>{userData.region || "N/A"}</td>
                         <td>
-                          <span className={`status-badge ${
-                            userData.isActive ? 'status-active' : 'status-inactive'
-                          }`}>
-                            {userData.isActive ? 'Active' : 'Inactive'}
+                          <span
+                            className={`status-badge ${
+                              userData.isActive
+                                ? "status-active"
+                                : "status-inactive"
+                            }`}
+                          >
+                            {userData.isActive ? "Active" : "Inactive"}
                           </span>
                         </td>
                         <td>

@@ -246,7 +246,6 @@ const Navigation = () => {
             <span className="link-text">Reports</span>
           </Link>
 
-
           {/* {user?.role === "super_admin" && (
             <Link
               to="/user-management"

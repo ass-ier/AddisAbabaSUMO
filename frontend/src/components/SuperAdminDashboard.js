@@ -32,7 +32,7 @@ const SuperAdminDashboard = () => {
           setRecentActivities([]);
         }
       } catch (err) {
-        console.warn('Failed to load overview stats:', err?.message || err);
+        console.warn("Failed to load overview stats:", err?.message || err);
       }
     })();
   }, []);
@@ -57,7 +57,12 @@ const SuperAdminDashboard = () => {
       value: `${stats.systemHealth || 0}%`,
       change: "",
       icon: "💚",
-      status: stats.systemHealth >= 80 ? "success" : stats.systemHealth >= 60 ? "warning" : "error",
+      status:
+        stats.systemHealth >= 80
+          ? "success"
+          : stats.systemHealth >= 60
+            ? "warning"
+            : "error",
     },
     {
       title: "Emergency Overrides",
@@ -81,7 +86,13 @@ const SuperAdminDashboard = () => {
     else if (action.includes("stop_simulation")) emoji = "⏹️";
     else if (action.includes("pause_simulation")) emoji = "⏸️";
     else if (action.includes("resume_simulation")) emoji = "▶️";
-    return { id: a._id || when + user + action, emoji, title: action, who: `${user}${role ? ' ('+role+')' : ''}`, when };
+    return {
+      id: a._id || when + user + action,
+      emoji,
+      title: action,
+      who: `${user}${role ? " (" + role + ")" : ""}`,
+      when,
+    };
   };
 
   const quickActions = [
@@ -144,7 +155,11 @@ const SuperAdminDashboard = () => {
                   <p className="text-sm font-medium text-muted-foreground">
                     {stat.title}
                   </p>
-                  <p className={`text-2xl font-bold ${stat.title === 'System Health' ? (stats.systemHealth >= 80 ? 'text-green-700' : stats.systemHealth >= 60 ? 'text-yellow-700' : 'text-red-700') : ''}`}>{stat.value}</p>
+                  <p
+                    className={`text-2xl font-bold ${stat.title === "System Health" ? (stats.systemHealth >= 80 ? "text-green-700" : stats.systemHealth >= 60 ? "text-yellow-700" : "text-red-700") : ""}`}
+                  >
+                    {stat.value}
+                  </p>
                   <p className="text-xs text-muted-foreground">{stat.change}</p>
                 </div>
                 <div className="text-3xl">{stat.icon}</div>
@@ -161,7 +176,8 @@ const SuperAdminDashboard = () => {
               <h3 className="text-lg font-semibold">Recent Activities</h3>
             </div>
             <div className="space-y-4">
-              {Array.isArray(recentActivities) && recentActivities.length > 0 ? (
+              {Array.isArray(recentActivities) &&
+              recentActivities.length > 0 ? (
                 recentActivities.map((aRaw) => {
                   const a = formatAudit(aRaw);
                   return (
@@ -171,11 +187,11 @@ const SuperAdminDashboard = () => {
                       </div>
                       <div className="flex-1 space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className={`badge badge-default`}>{a.title}</span>
+                          <span className={`badge badge-default`}>
+                            {a.title}
+                          </span>
                         </div>
-                        <p className="text-sm text-foreground">
-                          {a.who}
-                        </p>
+                        <p className="text-sm text-foreground">{a.who}</p>
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
                           🕒 {a.when}
                         </p>
@@ -184,7 +200,9 @@ const SuperAdminDashboard = () => {
                   );
                 })
               ) : (
-                <div className="text-sm text-muted-foreground">No recent activities</div>
+                <div className="text-sm text-muted-foreground">
+                  No recent activities
+                </div>
               )}
             </div>
           </div>
