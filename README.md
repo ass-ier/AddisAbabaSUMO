@@ -204,6 +204,15 @@ AddisAbabaSUMO-main/
 
 ---
 
+## Contributors
+
+- **Assier Anteneh**
+- **Kalkidan Tesfaye**
+- **Mattathias Abraham**
+- **Nathan Ermias**
+
+---
+
 ## License
 
 MIT
