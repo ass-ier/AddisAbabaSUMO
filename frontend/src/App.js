@@ -26,6 +26,15 @@ const UsersAdmin = React.lazy(() => import("./pages/UsersAdmin"));
 const AuditLogs = React.lazy(() => import("./pages/AuditLogs"));
 const ReportsAdmin = React.lazy(() => import("./pages/ReportsAdmin"));
 const EmergencyPanel = React.lazy(() => import("./pages/EmergencyPanel"));
+const OperatorEmergencies = React.lazy(
+  () => import("./pages/operator/OperatorEmergencies")
+);
+const OperatorAuditLogs = React.lazy(
+  () => import("./pages/operator/OperatorAuditLogs")
+);
+const OperatorUsers = React.lazy(
+  () => import("./pages/operator/OperatorUsers")
+);
 
 function App() {
   return (
@@ -116,6 +125,36 @@ function AppContent() {
             element={
               user && user.role === "super_admin" ? (
                 <EmergencyPanel />
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/operator/emergencies"
+            element={
+              user && user.role !== "super_admin" ? (
+                <OperatorEmergencies />
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/operator/audit"
+            element={
+              user && user.role !== "super_admin" ? (
+                <OperatorAuditLogs />
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route
+            path="/operator/users"
+            element={
+              user && user.role !== "super_admin" ? (
+                <OperatorUsers />
               ) : (
                 <Navigate to="/login" />
               )

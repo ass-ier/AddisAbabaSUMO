@@ -223,21 +223,59 @@ class SumoSubprocessService {
         }
       });
 
-      // Handle stderr
+      // Handle stderr with memory allocation detection
       this.process.stderr.on('data', (chunk) => {
         const msg = chunk.toString();
-        logger.error(`SUMO bridge stderr: ${msg}`);
+
+        // Best Practice: Detect memory allocation errors and provide helpful guidance
+        if (msg.includes('bad allocation') || msg.includes('std::bad_alloc')) {
+          logger.error('SUMO MEMORY ERROR: Network file too large for available memory');
+          logger.warn('RECOMMENDATION: Use a smaller network file or increase system memory');
+          logger.warn('System will continue running without SUMO simulation');
+
+          // Emit warning to connected clients
+          if (this.io) {
+            this.io.emit('sumo:warning', {
+              type: 'memory_error',
+              message: 'Network file too large. System running without SUMO simulation.',
+              recommendation: 'Consider using a smaller network subset'
+            });
+          }
+        } else {
+          logger.error(`SUMO bridge stderr: ${msg}`);
+        }
       });
 
       // Handle process exit
       this.process.on('exit', (code, signal) => {
-        logger.info(`SUMO bridge exited with code ${code}, signal ${signal}`);
+        const exitMsg = `SUMO bridge exited with code ${code}, signal ${signal}`;
+
+        // Best Practice: Different log levels based on exit code
+        if (code === 1 && signal === null) {
+          // Exit code 1 often means configuration/memory error
+          logger.warn(`${exitMsg} - Likely due to network file size or configuration issue`);
+          logger.info('APPLICATION CONTINUES: All other features remain functional');
+        } else if (code === 0) {
+          logger.info(`${exitMsg} - Clean shutdown`);
+        } else {
+          logger.error(`${exitMsg} - Unexpected exit`);
+        }
+
         this.isRunning = false;
         this.process = null;
         
         // Clear shared reference if available
         if (this.processRef) {
           this.processRef.process = null;
+        }
+
+        // Best Practice: Notify clients that system continues without SUMO
+        if (this.io && code !== 0) {
+          this.io.emit('sumo:status', {
+            running: false,
+            status: 'stopped',
+            message: 'SUMO simulation unavailable. All other features operational.'
+          });
         }
         
         onExit(code, signal);

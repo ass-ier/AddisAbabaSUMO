@@ -192,6 +192,50 @@ const Navigation = () => {
             </Link>
           )}
 
+          {user?.role !== "super_admin" && (
+            <>
+              <Link
+                to="/operator/emergencies"
+                className={`sidebar-link ${
+                  isActive("/operator/emergencies") ? "active" : ""
+                }`}
+                onClick={closeMenu}
+                title="Emergencies"
+              >
+                <span className="link-icon">
+                  <ExclamationTriangleIcon className="w-5 h-5" />
+                </span>
+                <span className="link-text">Emergencies</span>
+              </Link>
+              <Link
+                to="/operator/audit"
+                className={`sidebar-link ${
+                  isActive("/operator/audit") ? "active" : ""
+                }`}
+                onClick={closeMenu}
+                title="Activity Log"
+              >
+                <span className="link-icon">
+                  <ClipboardDocumentListIcon className="w-5 h-5" />
+                </span>
+                <span className="link-text">Activity Log</span>
+              </Link>
+              <Link
+                to="/operator/users"
+                className={`sidebar-link ${
+                  isActive("/operator/users") ? "active" : ""
+                }`}
+                onClick={closeMenu}
+                title="Team Directory"
+              >
+                <span className="link-icon">
+                  <UsersIcon className="w-5 h-5" />
+                </span>
+                <span className="link-text">Team</span>
+              </Link>
+            </>
+          )}
+
           {user?.role === "super_admin" && (
             <>
               <Link
