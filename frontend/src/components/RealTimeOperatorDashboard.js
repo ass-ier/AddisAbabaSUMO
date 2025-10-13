@@ -228,10 +228,10 @@ const RealTimeOperatorDashboard = () => {
         <div
           className={`p-3 rounded-lg border ${
             connected
-              ? "bg-green-50 border-green-200"
+              ? "bg-green-50 dark:bg-slate-800 border-green-200 dark:border-green-700"
               : error
-                ? "bg-red-50 border-red-200"
-                : "bg-yellow-50 border-yellow-200"
+                ? "bg-red-50 dark:bg-slate-800 border-red-200 dark:border-red-700"
+                : "bg-yellow-50 dark:bg-slate-800 border-yellow-200 dark:border-yellow-700"
           }`}
         >
           <div className="flex items-center justify-between">
@@ -239,11 +239,11 @@ const RealTimeOperatorDashboard = () => {
               {connected ? (
                 <>
                   <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-green-800 font-medium">
+                  <span className="text-green-800 dark:text-green-400 font-medium">
                     Real-time data connected
                   </span>
                   {lastUpdate && (
-                    <span className="text-green-600 text-sm">
+                    <span className="text-green-600 dark:text-green-400 text-sm">
                       • Last update: {new Date(lastUpdate).toLocaleTimeString()}
                     </span>
                   )}
@@ -251,19 +251,19 @@ const RealTimeOperatorDashboard = () => {
               ) : connecting ? (
                 <>
                   <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
-                  <span className="text-yellow-800 font-medium">
+                  <span className="text-yellow-800 dark:text-yellow-400 font-medium">
                     Connecting to real-time data...
                   </span>
                 </>
               ) : (
                 <>
                   <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                  <span className="text-red-800 font-medium">
+                  <span className="text-red-800 dark:text-red-400 font-medium">
                     Real-time connection unavailable
                   </span>
                   <button
                     onClick={connect}
-                    className="ml-2 px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                    className="ml-2 px-2 py-1 bg-red-600 dark:bg-red-700 text-white text-xs rounded hover:bg-red-700 dark:hover:bg-red-800 transition-colors"
                   >
                     Retry Connection
                   </button>
@@ -271,7 +271,7 @@ const RealTimeOperatorDashboard = () => {
               )}
             </div>
             {connected && (
-              <span className="text-green-600 text-sm">
+              <span className="text-green-600 dark:text-green-400 text-sm">
                 🔄 Live Updates Active
               </span>
             )}

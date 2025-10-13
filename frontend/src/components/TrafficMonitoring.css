@@ -162,10 +162,30 @@
   text-transform: uppercase;
 }
 
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--text);
+  font-size: 16px;
+}
+
 .no-data {
   text-align: center;
   padding: 40px;
   color: var(--muted);
+}
+
+/* Dark mode for loading and messages */
+[data-theme="dark"] .loading {
+  color: var(--text-primary, #e2e8f0);
+}
+
+[data-theme="dark"] .no-data {
+  color: var(--text-secondary, #94a3b8);
+}
+
+[data-theme="dark"] .no-data p {
+  color: var(--text-secondary, #94a3b8);
 }
 
 .traffic-summary {
