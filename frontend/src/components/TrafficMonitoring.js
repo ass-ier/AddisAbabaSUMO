@@ -14,6 +14,7 @@ const TrafficMonitoring = () => {
   });
   const [live, setLive] = useState(false);
   const socketRef = useRef(null);
+  const statusPollRef = useRef(null);
 
   const fetchTrafficData = useCallback(async () => {
     try {
@@ -43,6 +44,37 @@ const TrafficMonitoring = () => {
     fetchTrafficData();
   }, [filters, fetchTrafficData]);
 
+  // Auto-detect simulation status to drive live mode; if not running, show latest stored data
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const res = await axios.get("/api/sumo/status");
+        const running = !!res.data?.isRunning;
+        setLive((prev) => (prev !== running ? running : prev));
+        if (!running) {
+          // Ensure we have up-to-date stored data when not live
+          fetchTrafficData();
+        }
+      } catch (e) {
+        // If status check fails, fall back to non-live and load stored data
+        setLive(false);
+        fetchTrafficData();
+      }
+    };
+
+    // Initial check
+    checkStatus();
+    // Poll every 15s to react to status changes without altering layout
+    statusPollRef.current = setInterval(checkStatus, 15000);
+
+    return () => {
+      if (statusPollRef.current) {
+        clearInterval(statusPollRef.current);
+        statusPollRef.current = null;
+      }
+    };
+  }, [fetchTrafficData]);
+
   useEffect(() => {
     if (!live) {
       if (socketRef.current) {
@@ -51,7 +83,7 @@ const TrafficMonitoring = () => {
       }
       return;
     }
-    socketRef.current = io("http://localhost:5001");
+    socketRef.current = io("http://localhost:5001", { transports: ["websocket"] });
     socketRef.current.on("trafficData", (data) => {
       setTrafficData((prev) => [data, ...prev].slice(0, 500));
     });
