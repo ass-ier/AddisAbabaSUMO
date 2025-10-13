@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../utils/api";
 import "../components/UserManagement.css";
-import DebugAuth from "../components/DebugAuth";
 
 export default function UsersAdmin() {
   const [users, setUsers] = useState([]);
@@ -147,7 +146,6 @@ export default function UsersAdmin() {
 
   return (
     <div className="p-6">
-      <DebugAuth />
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
         <p className="text-gray-600">Admin - manage users</p>
