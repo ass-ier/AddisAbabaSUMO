@@ -41,7 +41,7 @@ class SumoLogsService {
       } = options;
 
       // Determine if user can see all logs or just their own
-      const canViewAllLogs = ['super_admin', 'admin', 'system_operator'].includes(requestingUser.role);
+      const canViewAllLogs = ['super_admin', 'admin', 'system_operator', 'operator'].includes(requestingUser.role);
       const username = canViewAllLogs ? null : requestingUser.username;
 
       const logs = await SumoLog.getRecentLogs({
@@ -116,7 +116,7 @@ class SumoLogsService {
    */
   async getLogStats(requestingUser = {}) {
     try {
-      const canViewAllLogs = ['super_admin', 'admin', 'system_operator'].includes(requestingUser.role);
+      const canViewAllLogs = ['super_admin', 'admin', 'system_operator', 'operator'].includes(requestingUser.role);
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
       let matchQuery = { timestamp: { $gte: since } };
