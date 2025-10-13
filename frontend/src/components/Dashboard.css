@@ -47,7 +47,7 @@
   color: var(--success);
 }
 .text-muted-foreground {
-  color: var(--muted);
+  color: var(--text-muted);
 }
 .text-foreground {
   color: var(--text);

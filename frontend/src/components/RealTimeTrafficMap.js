@@ -15,17 +15,12 @@ L.Icon.Default.mergeOptions({
 });
 
 const RealTimeTrafficMap = () => {
-  const {
-    connected,
-    connecting,
-    trafficData,
-    lastUpdate
-  } = useTrafficData();
+  const { connected, connecting, trafficData, lastUpdate } = useTrafficData();
 
   // Addis Ababa center coordinates
   const [mapCenter] = useState([9.03, 38.74]);
   const [mapZoom] = useState(12);
-  
+
   // Sample traffic data - in real app this would come from real-time data
   const [trafficPoints, setTrafficPoints] = useState([
     {
@@ -80,10 +75,10 @@ const RealTimeTrafficMap = () => {
     if (trafficData?.stats) {
       // Update traffic points with real-time data
       // This is where you'd integrate actual traffic data from your backend
-      console.log('Real-time traffic data received:', trafficData);
-      
+      console.log("Real-time traffic data received:", trafficData);
+
       // Example: Update traffic points with new data
-      // setTrafficPoints(prevPoints => 
+      // setTrafficPoints(prevPoints =>
       //   prevPoints.map(point => ({
       //     ...point,
       //     vehicleCount: Math.random() * 100,
@@ -99,11 +94,17 @@ const RealTimeTrafficMap = () => {
     if (!connected) return;
 
     const interval = setInterval(() => {
-      setTrafficPoints(prevPoints => 
-        prevPoints.map(point => ({
+      setTrafficPoints((prevPoints) =>
+        prevPoints.map((point) => ({
           ...point,
-          vehicleCount: Math.max(5, point.vehicleCount + (Math.random() - 0.5) * 10),
-          averageSpeed: Math.max(5, Math.min(50, point.averageSpeed + (Math.random() - 0.5) * 5)),
+          vehicleCount: Math.max(
+            5,
+            point.vehicleCount + (Math.random() - 0.5) * 10
+          ),
+          averageSpeed: Math.max(
+            5,
+            Math.min(50, point.averageSpeed + (Math.random() - 0.5) * 5)
+          ),
         }))
       );
     }, 5000); // Update every 5 seconds
@@ -154,7 +155,7 @@ const RealTimeTrafficMap = () => {
               <h3 className="text-lg font-semibold">Traffic Overview</h3>
               <RealTimeStatus showDetails={true} />
             </div>
-            
+
             <div className="flex items-center gap-6 text-sm">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-green-500 rounded-full"></div>
@@ -192,7 +193,7 @@ const RealTimeTrafficMap = () => {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              
+
               {trafficPoints.map((point) => (
                 <React.Fragment key={point.id}>
                   {/* Traffic Circle Indicator */}
@@ -206,7 +207,7 @@ const RealTimeTrafficMap = () => {
                       weight: connected ? 3 : 2,
                     }}
                   />
-                  
+
                   {/* Marker */}
                   <Marker position={point.position}>
                     <Popup>
@@ -232,11 +233,15 @@ const RealTimeTrafficMap = () => {
                           </div>
                           <div className="flex justify-between">
                             <span>Status:</span>
-                            <span className={`font-medium capitalize ${
-                              point.status === 'normal' ? 'text-green-600' :
-                              point.status === 'moderate' ? 'text-orange-600' :
-                              'text-red-600'
-                            }`}>
+                            <span
+                              className={`font-medium capitalize ${
+                                point.status === "normal"
+                                  ? "text-green-600"
+                                  : point.status === "moderate"
+                                    ? "text-orange-600"
+                                    : "text-red-600"
+                              }`}
+                            >
                               {point.status}
                             </span>
                           </div>
@@ -261,9 +266,13 @@ const RealTimeTrafficMap = () => {
           <div className="bg-white p-4 rounded-lg shadow-sm border">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="text-sm font-medium text-gray-500">Total Vehicles</h4>
+                <h4 className="text-sm font-medium text-gray-500">
+                  Total Vehicles
+                </h4>
                 <p className="text-2xl font-bold">
-                  {trafficPoints.reduce((sum, point) => sum + point.vehicleCount, 0).toFixed(0)}
+                  {trafficPoints
+                    .reduce((sum, point) => sum + point.vehicleCount, 0)
+                    .toFixed(0)}
                 </p>
               </div>
               <div className="text-3xl">🚗</div>
@@ -279,9 +288,17 @@ const RealTimeTrafficMap = () => {
           <div className="bg-white p-4 rounded-lg shadow-sm border">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="text-sm font-medium text-gray-500">Average Speed</h4>
+                <h4 className="text-sm font-medium text-gray-500">
+                  Average Speed
+                </h4>
                 <p className="text-2xl font-bold">
-                  {(trafficPoints.reduce((sum, point) => sum + point.averageSpeed, 0) / trafficPoints.length).toFixed(1)} km/h
+                  {(
+                    trafficPoints.reduce(
+                      (sum, point) => sum + point.averageSpeed,
+                      0
+                    ) / trafficPoints.length
+                  ).toFixed(1)}{" "}
+                  km/h
                 </p>
               </div>
               <div className="text-3xl">⚡</div>
@@ -297,7 +314,9 @@ const RealTimeTrafficMap = () => {
           <div className="bg-white p-4 rounded-lg shadow-sm border">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="text-sm font-medium text-gray-500">Active Locations</h4>
+                <h4 className="text-sm font-medium text-gray-500">
+                  Active Locations
+                </h4>
                 <p className="text-2xl font-bold">{trafficPoints.length}</p>
               </div>
               <div className="text-3xl">📍</div>

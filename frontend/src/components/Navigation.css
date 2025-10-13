@@ -47,12 +47,20 @@
 
 /* Sidebar Header */
 .sidebar-header {
-  padding: 1rem;
+  padding: 1.25rem 1rem;
   border-bottom: 1px solid var(--sidebar-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: auto;
+}
+
+/* Top row: Brand and Toggle */
+.sidebar-header-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 70px;
+  gap: 0.5rem;
 }
 
 .sidebar-brand {
@@ -60,21 +68,36 @@
   align-items: center;
   gap: 0.75rem;
   overflow: hidden;
+  flex: 1;
 }
 
 .brand-icon {
-  font-size: 1.5rem;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  border-radius: 0.5rem;
+  color: white;
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.brand-icon svg {
+  width: 20px;
+  height: 20px;
 }
 
 .brand-text {
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1rem;
   color: var(--sidebar-text);
   white-space: nowrap;
   opacity: 0;
   transform: translateX(-10px);
   transition: all 0.3s ease;
+  letter-spacing: -0.02em;
 }
 
 .sidebar.expanded .brand-text {
@@ -82,31 +105,62 @@
   transform: translateX(0);
 }
 
-.sidebar-toggle {
+/* Status Section */
+.sidebar-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
   background: var(--sidebar-hover);
+  border-radius: 0.5rem;
   border: 1px solid var(--sidebar-border);
-  border-radius: 0.375rem;
+  transition: all 0.3s ease;
+  min-height: 38px;
+}
+
+.sidebar.expanded .sidebar-status {
+  justify-content: flex-start;
+  padding: 0.5rem 0.75rem;
+}
+
+/* Toggle Button */
+.sidebar-toggle {
+  background: transparent;
+  border: 1px solid var(--sidebar-border);
+  border-radius: 0.5rem;
   padding: 0.5rem;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: var(--sidebar-text);
-  width: 32px;
-  height: 32px;
+  color: var(--sidebar-text-secondary);
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  position: relative;
 }
 
 .sidebar-toggle:hover {
-  background: var(--sidebar-active);
-  color: white;
+  background: var(--sidebar-hover);
+  border-color: var(--sidebar-active);
+  color: var(--sidebar-active);
   transform: scale(1.05);
 }
 
+.sidebar-toggle:active {
+  transform: scale(0.95);
+}
+
 .toggle-icon {
-  font-size: 0.875rem;
-  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toggle-icon svg {
+  width: 20px;
+  height: 20px;
 }
 
 /* Sidebar Menu */

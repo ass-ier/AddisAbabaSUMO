@@ -95,28 +95,30 @@ const Navigation = () => {
       <NotificationsBar />
       <nav className={`sidebar ${menuOpen ? "expanded" : ""}`}>
         <div className="sidebar-header">
-          <div className="sidebar-brand">
-            <span className="brand-icon">
-              <ExclamationTriangleIcon className="w-6 h-6" />
-            </span>
-            <span className="brand-text">Traffic System</span>
+          {/* Top row: Brand and Toggle */}
+          <div className="sidebar-header-top">
+            <div className="sidebar-brand">
+              <span className="brand-icon">
+                <ExclamationTriangleIcon />
+              </span>
+              <span className="brand-text">Traffic System</span>
+            </div>
+            <button
+              className="sidebar-toggle"
+              onClick={() => setMenuOpen(!menuOpen)}
+              aria-label="Toggle sidebar"
+              title={menuOpen ? "Collapse sidebar" : "Expand sidebar"}
+            >
+              <span className="toggle-icon">
+                {menuOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
+              </span>
+            </button>
           </div>
+
+          {/* Status Section */}
           <div className="sidebar-status">
-            <RealTimeStatus className="px-2" showDetails={menuOpen} />
+            <RealTimeStatus showDetails={menuOpen} />
           </div>
-          <button
-            className="sidebar-toggle"
-            onClick={() => setMenuOpen(!menuOpen)}
-            aria-label="Toggle sidebar"
-          >
-            <span className="toggle-icon">
-              {menuOpen ? (
-                <ChevronLeftIcon className="w-5 h-5" />
-              ) : (
-                <ChevronRightIcon className="w-5 h-5" />
-              )}
-            </span>
-          </button>
         </div>
 
         <div className="sidebar-menu">
@@ -245,7 +247,6 @@ const Navigation = () => {
             </span>
             <span className="link-text">Reports</span>
           </Link>
-
 
           {/* {user?.role === "super_admin" && (
             <Link
