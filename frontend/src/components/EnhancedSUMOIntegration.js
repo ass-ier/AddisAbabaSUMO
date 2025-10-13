@@ -404,6 +404,8 @@ const EnhancedSUMOIntegration = () => {
         currentTime
       );
 
+      // Compute mode with preference: RL if user selected RL or backend says RL, otherwise keep previous or backend value
+      const backendMode = typeof data.mode === "string" ? data.mode : null;
       const statusUpdate = {
         isRunning: Boolean(data.isRunning),
         status: data.status || "stopped",
@@ -412,9 +414,7 @@ const EnhancedSUMOIntegration = () => {
         currentTime: currentTime, // Use calculated SUMO simulation time
         speed: Number(data.speed) || 1.0,
         stepLength: stepLength, // Store step length for calculations
-        mode: typeof data.mode === "string" ? data.mode : "fixed",
-        // Don't override user-selected scenario with backend data
-        // scenario: preserve existing scenario selection
+        // mode computed inside setSimulationStatus callback to access previous state
         startTime: data.startTime,
         endTime: data.endTime,
         networkFile: config.networkFile || "default.net.xml",
@@ -453,7 +453,11 @@ const EnhancedSUMOIntegration = () => {
             },
           });
         }
-        return { ...prev, ...statusUpdate };
+        // Determine correct mode to persist: if user selected RL, keep RL while running
+        const computedMode = (lightControlMode === "rl" || backendMode === "rl" || prev.mode === "rl") && (data.isRunning || prev.isRunning)
+          ? "rl"
+          : (backendMode || prev.mode || "fixed");
+        return { ...prev, ...statusUpdate, mode: computedMode };
       });
     });
 
@@ -701,6 +705,7 @@ const EnhancedSUMOIntegration = () => {
       const stepLength = Number(config.stepLength) || 1.0;
       const currentTime = currentStep * stepLength;
 
+      const backendMode = typeof data.mode === "string" ? data.mode : null;
       const statusUpdate = {
         isRunning: Boolean(data.isRunning),
         status: data.status || "stopped",
@@ -709,9 +714,7 @@ const EnhancedSUMOIntegration = () => {
         currentTime: currentTime,
         speed: Number(data.speed) || 1.0,
         stepLength: stepLength,
-        mode: typeof data.mode === "string" ? data.mode : "fixed",
-        // Don't override user-selected scenario with backend data
-        // scenario: preserve existing scenario selection
+        // mode computed with previous state below
         startTime: data.startTime,
         endTime: data.endTime,
         networkFile: config.networkFile || "default.net.xml",
@@ -749,7 +752,10 @@ const EnhancedSUMOIntegration = () => {
             },
           });
         }
-        return { ...prev, ...statusUpdate };
+        const computedMode = (lightControlMode === "rl" || backendMode === "rl" || prev.mode === "rl") && (data.isRunning || prev.isRunning)
+          ? "rl"
+          : (backendMode || prev.mode || "fixed");
+        return { ...prev, ...statusUpdate, mode: computedMode };
       });
     } catch (error) {
       console.error("Error fetching simulation status:", error);
@@ -821,7 +827,7 @@ const EnhancedSUMOIntegration = () => {
         totalSteps: Number(responseData.totalSteps) || 0,
         currentTime: Number(responseData.currentTime) || 0,
         speed: Number(responseData.speed) || 1.0,
-        mode: lightControlMode, // Use the selected light control mode
+        mode: lightControlMode === "rl" ? "rl" : "fixed", // persist selected mode
         scenario: simulationStatus.scenario, // Keep the selected scenario
         startTime: responseData.startTime,
         endTime: responseData.endTime,
@@ -1270,12 +1276,15 @@ const EnhancedSUMOIntegration = () => {
                     className="config-item"
                     style={{ display: "flex", alignItems: "center", gap: 8 }}
                   >
-                    <input
+                  <input
                       type="radio"
                       name="lightControlMode"
                       value="fixed"
                       checked={lightControlMode === "fixed"}
-                      onChange={() => setLightControlMode("fixed")}
+                      onChange={() => {
+                        setLightControlMode("fixed");
+                        setSimulationStatus((prev) => ({ ...prev, mode: "fixed" }));
+                      }}
                     />
                     <span>Fixed time (from AddisAbaba.net.xml)</span>
                   </label>
@@ -1283,12 +1292,15 @@ const EnhancedSUMOIntegration = () => {
                     className="config-item"
                     style={{ display: "flex", alignItems: "center", gap: 8 }}
                   >
-                    <input
+                  <input
                       type="radio"
                       name="lightControlMode"
                       value="rl"
                       checked={lightControlMode === "rl"}
-                      onChange={() => setLightControlMode("rl")}
+                      onChange={() => {
+                        setLightControlMode("rl");
+                        setSimulationStatus((prev) => ({ ...prev, mode: "rl" }));
+                      }}
                     />
                     <span>RL (BestModel)</span>
                   </label>

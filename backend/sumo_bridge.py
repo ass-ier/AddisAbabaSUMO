@@ -8,6 +8,8 @@ import xml.etree.ElementTree as ET
 from math import cos, sin, radians, atan2, degrees
 import threading
 import queue
+import numpy as np
+import traceback
 
 # Try to add SUMO tools to path for traci
 if 'SUMO_HOME' in os.environ:
@@ -450,19 +452,57 @@ def main():
         )
         model = PPO.load(args.rl_model, device='cpu')
 
+        # Determine expected observation dimension from model if available
+        try:
+            expected_dim = int(getattr(getattr(model, 'observation_space', None), 'shape', [72])[0])
+        except Exception:
+            expected_dim = 72
+
+        def adapt_observation(ob, target_dim: int):
+            try:
+                arr = np.asarray(ob, dtype=np.float32).reshape(-1)
+                if arr.shape[0] == target_dim:
+                    return arr
+                if arr.shape[0] > target_dim:
+                    print(json.dumps({"type": "log", "level": "warn", "message": f"Obs dim {arr.shape[0]} > {target_dim}; slicing."})); sys.stdout.flush()
+                    return arr[:target_dim]
+                # pad with zeros
+                pad = np.zeros((target_dim - arr.shape[0],), dtype=np.float32)
+                print(json.dumps({"type": "log", "level": "warn", "message": f"Obs dim {arr.shape[0]} < {target_dim}; padding."})); sys.stdout.flush()
+                return np.concatenate([arr, pad], axis=0)
+            except Exception as e:
+                print(json.dumps({"type": "log", "level": "warn", "message": f"Failed to adapt obs: {e}"})); sys.stdout.flush()
+                return ob
+
         # Reset and run loop
         obs, info = env.reset()
+        obs = adapt_observation(obs, expected_dim)
         step = 0
         try:
             while True:
-                action, _ = model.predict(obs, deterministic=True)
-                obs, reward, done, truncated, info = env.step(action)
+                # Ensure observation matches model expectation
+                obs_in = adapt_observation(obs, expected_dim)
+                action, _ = model.predict(obs_in, deterministic=True)
+                # Ensure actions are at least 1D (env slices with actions[:len(tls_ids)])
+                try:
+                    act_arr = np.asarray(action)
+                    if act_arr.ndim == 0:
+                        actions_vec = act_arr.reshape(1)
+                    elif act_arr.ndim > 1:
+                        actions_vec = act_arr.flatten()
+                    else:
+                        actions_vec = act_arr
+                except Exception:
+                    actions_vec = np.array([action])
+                obs, reward, done, truncated, info = env.step(actions_vec)
+                obs = adapt_observation(obs, expected_dim)
                 step = info.get('simulation_step', step + int(args.rl_delta))
 
                 # Collect vehicles
                 vehicles = []
                 try:
                     ids = traci.vehicle.getIDList()
+                    vehicle_ids = ids
                     for vid in ids:
                         x, y = traci.vehicle.getPosition(vid)
                         speed = traci.vehicle.getSpeed(vid)
@@ -721,7 +761,10 @@ def main():
         except KeyboardInterrupt:
             pass
         except Exception as e:
-            print(json.dumps({"type": "error", "message": str(e)})); sys.stdout.flush()
+            try:
+                print(json.dumps({"type": "error", "message": str(e), "stack": traceback.format_exc()})); sys.stdout.flush()
+            except Exception:
+                print(json.dumps({"type": "error", "message": str(e)})); sys.stdout.flush()
         finally:
             try:
                 env.close()

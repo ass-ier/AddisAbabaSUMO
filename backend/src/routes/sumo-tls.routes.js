@@ -350,22 +350,40 @@ module.exports = function createSumoTlsRoutes(dependencies) {
           // Check if scenario is provided in parameters for dynamic config selection
           const scenario = parameters.scenario;
           if (scenario) {
-            // Map scenario to specific SUMO config file
+            // Map scenario to specific SUMO config file (fallback only)
             const scenarioConfigMap = {
               'default': 'AddisAbabaSimple.sumocfg',
               'rush_hour': 'AddisAbabaSimple_peak.sumocfg', 
               'night': 'AddisAbabaSimple_offpeak.sumocfg',
               'accident': 'AddisAbabaSimple_jitter.sumocfg'
             };
-            
-            selectedConfigName = scenarioConfigMap[scenario] || scenarioConfigMap.default;
-            cfgPathEffective = resolveSumoConfigPath(selectedConfigName);
-            
-            logger.info('Using scenario-based SUMO config:', {
-              scenario,
-              selectedConfig: selectedConfigName,
-              resolvedPath: cfgPathEffective
-            });
+
+            // Prefer DB-selected config if available and valid; scenario mapping is only a fallback
+            try {
+              const s = await Settings.findOne();
+              const dbSelected = s?.sumo?.selectedConfig || null;
+              if (dbSelected) {
+                const dbResolved = resolveSumoConfigPath(dbSelected);
+                if (dbResolved && fs.existsSync(dbResolved)) {
+                  selectedConfigName = dbSelected;
+                  cfgPathEffective = dbResolved;
+                  logger.info('Using DB-selected SUMO config:', { selectedConfig: selectedConfigName, resolvedPath: cfgPathEffective });
+                }
+              }
+            } catch (e) {
+              logger.warn('Failed to read DB-selected config, will try scenario mapping:', e.message);
+            }
+
+            if (!cfgPathEffective) {
+              selectedConfigName = scenarioConfigMap[scenario] || scenarioConfigMap.default;
+              const mapped = resolveSumoConfigPath(selectedConfigName);
+              if (mapped && fs.existsSync(mapped)) {
+                cfgPathEffective = mapped;
+                logger.info('Using scenario-mapped SUMO config:', { scenario, selectedConfig: selectedConfigName, resolvedPath: cfgPathEffective });
+              } else {
+                logger.warn('Scenario-mapped config not found; will fall back to environment/default configuration', { scenario, selectedConfigName, mapped });
+              }
+            }
           } else {
             // Fallback to database settings or environment variable
             try {
@@ -464,10 +482,11 @@ module.exports = function createSumoTlsRoutes(dependencies) {
                 } else if (payload.type === 'net') {
                   io.emit('sumoNet', payload);
                 } else if (payload.type === 'error') {
-                  logger.error(`SUMO error: ${payload.message}`);
+                  const stackInfo = payload.stack ? `\nStack: ${payload.stack}` : '';
+                  logger.error(`SUMO error: ${payload.message}${stackInfo}`);
                   io.emit('simulationLog', {
                     level: 'error',
-                    message: payload.message,
+                    message: payload.stack ? `${payload.message} | ${payload.stack}` : payload.message,
                     ts: Date.now()
                   });
                 }

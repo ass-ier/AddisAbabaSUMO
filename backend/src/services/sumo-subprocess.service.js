@@ -150,28 +150,39 @@ class SumoSubprocessService {
         '--step-length', String(stepLength)
       ];
 
-      // Add RL options if provided
-      if (rlOptions && rlOptions.modelPath) {
+      // Add RL options if requested
+      if (rlOptions) {
         const ROOT_DIR = path.join(__dirname, '../../../');
-        let rlModelPath = rlOptions.modelPath;
+        // Allow overriding model path via env if not provided by caller
+        let rlModelPath = rlOptions.modelPath || process.env.RL_MODEL_PATH || '';
 
-        if (!path.isAbsolute(rlModelPath)) {
-          const defaultModel = path.join(ROOT_DIR, 'frontend', 'public', 'Sumoconfigs', 'logs', 'best_model.zip');
-          if (fs.existsSync(defaultModel)) {
-            rlModelPath = defaultModel;
-          } else {
-            rlModelPath = path.join(ROOT_DIR, rlModelPath);
+        if (rlModelPath) {
+          if (!path.isAbsolute(rlModelPath)) {
+            const defaultPublic = path.join(ROOT_DIR, 'frontend', 'public', 'Sumoconfigs', 'logs', 'best_model.zip');
+            if (fs.existsSync(defaultPublic)) {
+              rlModelPath = defaultPublic;
+            } else {
+              rlModelPath = path.join(ROOT_DIR, rlModelPath);
+            }
           }
+        } else {
+          // No model specified; try well-known default in project tree
+          const candidates = [
+            path.join(ROOT_DIR, 'frontend', 'public', 'Sumoconfigs', 'logs', 'best_model.zip'),
+            path.join(ROOT_DIR, 'Sumoconfigs', 'logs', 'best_model.zip')
+          ];
+          rlModelPath = candidates.find(p => fs.existsSync(p)) || '';
         }
 
-        if (fs.existsSync(rlModelPath)) {
-          args.push('--rl-model', rlModelPath);
-          args.push('--rl-delta', String(rlOptions.delta || 15));
-          if (startWithGui) args.push('--rl-use-gui');
-          logger.info(`RL control enabled with model ${rlModelPath}`);
-        } else {
-          logger.warn('RL model not found; running SUMO default logic');
+        if (!rlModelPath || !fs.existsSync(rlModelPath)) {
+          // Fail fast instead of silently falling back to fixed logic
+          throw new Error('RL requested but model file not found. Provide a valid RL model path or set RL_MODEL_PATH.');
         }
+
+        args.push('--rl-model', rlModelPath);
+        args.push('--rl-delta', String(rlOptions.delta || 15));
+        if (startWithGui) args.push('--rl-use-gui');
+        logger.info(`RL control enabled with model ${rlModelPath}`);
       }
 
       // Spawn the process
