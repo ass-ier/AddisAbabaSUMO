@@ -242,24 +242,35 @@ const SuperAdminDashboard = () => {
             <h3 className="text-lg font-semibold">System Overview</h3>
           </div>
           <div className="grid gap-4 md:grid-cols-3">
-            <div className="text-center p-4 bg-green-50 rounded-lg">
-              <div className="text-3xl mb-2">🚦</div>
-              <h4 className="font-medium text-green-800">Traffic Control</h4>
-              <p className="text-sm text-green-600">
+            {/* Traffic Control */}
+            <div className="text-center p-6 rounded-lg border border-green-200 dark:border-transparent bg-green-50 dark:bg-green-900/20 hover:shadow-md transition-all duration-200">
+              <div className="text-4xl mb-3">🚦</div>
+              <h4 className="font-semibold text-green-800 dark:text-green-400 mb-2">
+                Traffic Control
+              </h4>
+              <p className="text-sm text-green-600 dark:text-green-300">
                 {stats.activeSimulations} active simulations
               </p>
             </div>
-            <div className="text-center p-4 bg-blue-50 rounded-lg">
-              <div className="text-3xl mb-2">👥</div>
-              <h4 className="font-medium text-blue-800">User Management</h4>
-              <p className="text-sm text-blue-600">
+
+            {/* User Management */}
+            <div className="text-center p-6 rounded-lg border border-blue-200 dark:border-transparent bg-blue-50 dark:bg-blue-900/20 hover:shadow-md transition-all duration-200">
+              <div className="text-4xl mb-3">👥</div>
+              <h4 className="font-semibold text-blue-800 dark:text-blue-400 mb-2">
+                User Management
+              </h4>
+              <p className="text-sm text-blue-600 dark:text-blue-300">
                 {stats.userCount} total users
               </p>
             </div>
-            <div className="text-center p-4 bg-purple-50 rounded-lg">
-              <div className="text-3xl mb-2">📊</div>
-              <h4 className="font-medium text-purple-800">Emergencies</h4>
-              <p className="text-sm text-purple-600">
+
+            {/* Emergencies */}
+            <div className="text-center p-6 rounded-lg border border-purple-200 dark:border-transparent bg-purple-50 dark:bg-purple-900/20 hover:shadow-md transition-all duration-200">
+              <div className="text-4xl mb-3">🚨</div>
+              <h4 className="font-semibold text-purple-800 dark:text-purple-400 mb-2">
+                Emergencies
+              </h4>
+              <p className="text-sm text-purple-600 dark:text-purple-300">
                 {stats.emergencyCount} active emergencies
               </p>
             </div>

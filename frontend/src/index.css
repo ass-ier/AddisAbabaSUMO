@@ -63,9 +63,9 @@
   --card: #1e293b;
   --card-hover: #334155;
   
-  /* Borders */
-  --border: #334155;
-  --border-light: #475569;
+  /* Borders - Make them transparent to avoid frames */
+  --border: transparent;
+  --border-light: transparent;
   
   /* Text */
   --text: #f1f5f9;
@@ -98,11 +98,11 @@
   /* Tables */
   --table-header: #1e293b;
   --table-row-hover: #334155;
-  --table-border: #475569;
+  --table-border: transparent;
   
   /* Inputs */
   --input-bg: #1e293b;
-  --input-border: #475569;
+  --input-border: rgba(255, 255, 255, 0.1);
   --input-focus: #60a5fa;
   --input-disabled: #334155;
 }
@@ -135,6 +135,19 @@ body,
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   box-shadow: var(--shadow-sm);
+}
+
+/* Remove ALL card borders and frames in dark mode */
+.dark .card,
+.dark .shadow-card {
+  border: none !important;
+}
+
+/* Also remove from Tailwind utility classes */
+.dark .border,
+.dark .border-2,
+.dark [class*="border-"] {
+  border-color: transparent !important;
 }
 
 .card:hover {
@@ -317,7 +330,7 @@ textarea:disabled {
   border-color: var(--border) !important;
 }
 
-/* Text elements in dark mode */
+/* Text elements in dark mode - NO BORDERS */
 .dark h1:not(.login-header h1):not(.login-form h1),
 .dark h2:not(.login-header h2):not(.login-form h2),
 .dark h3:not(.login-header h3):not(.login-form h3),
@@ -328,15 +341,33 @@ textarea:disabled {
 .dark label:not(.login-form label),
 .dark span:not(.login-form span) {
   color: var(--text) !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
 }
 
-/* Secondary/muted text */
+/* Secondary/muted text - NO BORDERS */
 .dark [class*="description"],
 .dark [class*="subtitle"],
 .dark [class*="label"],
 .dark [class*="caption"],
 .dark small {
   color: var(--text-secondary) !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Remove borders from all text utility classes */
+.dark .text-sm,
+.dark .text-xs,
+.dark .text-muted-foreground,
+.dark .text-foreground,
+.dark [class*="text-"] {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 /* Tables */
