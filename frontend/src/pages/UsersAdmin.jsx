@@ -17,6 +17,7 @@ export default function UsersAdmin() {
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [pwdModal, setPwdModal] = useState({ open: false, username: "", pwd: "" });
 
   const load = async () => {
     try {
@@ -136,11 +137,67 @@ export default function UsersAdmin() {
 
   const removeUser = async (id) => {
     if (!window.confirm("Delete this user?")) return;
+    // Optimistic removal from table
+    setUsers((prev) => prev.filter((u) => u._id !== id));
     try {
       await api.deleteUser(id);
-      await load();
+      // Optional notify
+      try {
+        window.dispatchEvent(new CustomEvent('notify', { detail: { type: 'success', message: 'User deleted' } }));
+      } catch (_) {}
     } catch (e) {
       console.error("Failed to delete user", e);
+      setMessage("Failed to delete user: " + (e.message || "Unknown error"));
+      // Reload to restore original list
+      await load();
+    }
+  };
+
+  const generateTempPassword = () => {
+    try {
+      const arr = new Uint32Array(1);
+      window.crypto.getRandomValues(arr);
+      const num = arr[0] % 1000000; // 0..999999
+      return String(num).padStart(6, '0');
+    } catch (_) {
+      // Fallback if crypto is unavailable
+      const num = Math.floor(Math.random() * 1000000);
+      return String(num).padStart(6, '0');
+    }
+  };
+
+  const handleAction = async (userObj, action) => {
+    try {
+      if (action === 'reset_pwd') {
+        if (!window.confirm(`Reset password for ${userObj.username}?`)) return;
+        const temp = generateTempPassword();
+        await api.updateUser(userObj._id, { password: temp });
+        setPwdModal({ open: true, username: userObj.username, pwd: temp });
+        // Optionally notify
+        try {
+          window.dispatchEvent(new CustomEvent('notify', { detail: { type: 'info', message: `Temporary password set for ${userObj.username}` } }));
+        } catch (_) {}
+        return;
+      }
+      if (action === 'deactivate') {
+        if (!window.confirm(`Deactivate ${userObj.username}?`)) return;
+        await api.updateUser(userObj._id, { isActive: false });
+        await load();
+        return;
+      }
+      if (action === 'activate') {
+        if (!window.confirm(`Activate ${userObj.username}?`)) return;
+        await api.updateUser(userObj._id, { isActive: true });
+        await load();
+        return;
+      }
+      if (action === 'delete') {
+        await removeUser(userObj._id);
+        return;
+      }
+    } catch (e) {
+      console.error('Action failed', e);
+      setMessage(`Action failed: ${e.message || 'Unknown error'}`);
     }
   };
 
@@ -346,12 +403,26 @@ export default function UsersAdmin() {
                             : "N/A"}
                         </td>
                         <td>
-                          <button
-                            className="text-red-600 hover:text-red-800 text-xs"
-                            onClick={() => removeUser(userData._id)}
+                          <select
+                            className="action-select"
+                            defaultValue=""
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              e.target.value = "";
+                              if (v) handleAction(userData, v);
+                            }}
                           >
-                            Delete
-                          </button>
+                            <option value="" disabled>
+                              Actions
+                            </option>
+                            <option value="reset_pwd">Reset Password</option>
+                            {userData.isActive ? (
+                              <option value="deactivate">Deactivate</option>
+                            ) : (
+                              <option value="activate">Activate</option>
+                            )}
+                            <option value="delete">Delete</option>
+                          </select>
                         </td>
                       </tr>
                     ))}
@@ -366,6 +437,92 @@ export default function UsersAdmin() {
           )}
         </div>
       </div>
+
+      {pwdModal.open && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+          aria-modal="true"
+          role="dialog"
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 8,
+              width: "min(480px, 92vw)",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              padding: 20,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 18 }}>Temporary Password</h3>
+              <button
+                onClick={() => setPwdModal({ open: false, username: "", pwd: "" })}
+                style={{ background: "transparent", border: "none", fontSize: 18, cursor: "pointer" }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <p style={{ marginTop: 0, color: "#555" }}>
+              Share this temporary password with <strong>{pwdModal.username}</strong>. They will be prompted to change it after logging in.
+            </p>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                background: "#f7f7f7",
+                border: "1px solid #e5e7eb",
+                borderRadius: 6,
+                padding: "10px 12px",
+                marginTop: 8,
+                marginBottom: 12,
+              }}
+            >
+              <code style={{ fontSize: 20, letterSpacing: 2 }}>{pwdModal.pwd}</code>
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(pwdModal.pwd);
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { type: 'success', message: 'Copied temporary password' } }));
+                  } catch (_) {
+                    // fallback: create input for copy
+                    try {
+                      const el = document.createElement('input');
+                      el.value = pwdModal.pwd;
+                      document.body.appendChild(el);
+                      el.select();
+                      document.execCommand('copy');
+                      document.body.removeChild(el);
+                      window.dispatchEvent(new CustomEvent('notify', { detail: { type: 'success', message: 'Copied temporary password' } }));
+                    } catch (e) {}
+                  }
+                }}
+                className="btn-secondary"
+                style={{ marginLeft: "auto" }}
+              >
+                Copy
+              </button>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                className="btn-primary"
+                onClick={() => setPwdModal({ open: false, username: "", pwd: "" })}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -238,8 +238,8 @@ class UserService {
         throw new AppError('Only super admins can delete users', 403);
       }
 
-      // Soft delete (preserve data but deactivate)
-      const deleted = await userRepository.softDelete(id);
+      // Hard delete (permanent removal)
+      const deleted = await userRepository.delete(id);
 
       // Invalidate caches
       await cacheService.del(`user:${id}`);

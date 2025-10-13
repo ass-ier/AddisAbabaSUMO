@@ -9,6 +9,7 @@ const Login = () => {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [deactModal, setDeactModal] = useState({ open: false, message: "" });
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -43,9 +44,13 @@ const Login = () => {
         navigate("/dashboard", { replace: true });
       }
     } catch (err) {
-      setError(
-        err.message || "Failed to log in. Please check your credentials."
-      );
+      const msg = err.message || "Failed to log in. Please check your credentials.";
+      if (err.status === 403 || /deactivat(ed|ion)/i.test(msg)) {
+        setError("");
+        setDeactModal({ open: true, message: "Account deactivated. Please contact admin to activate." });
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -146,6 +151,48 @@ const Login = () => {
           </p>
         </div>
       </div>
+      {deactModal.open && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 8,
+              width: "min(460px, 92vw)",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              padding: 20,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 18 }}>Login blocked</h3>
+              <button
+                onClick={() => setDeactModal({ open: false, message: "" })}
+                style={{ background: "transparent", border: "none", fontSize: 18, cursor: "pointer" }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <p style={{ marginTop: 0, color: "#555" }}>{deactModal.message}</p>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn-primary" onClick={() => setDeactModal({ open: false, message: "" })}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

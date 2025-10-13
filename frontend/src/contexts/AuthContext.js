@@ -25,6 +25,18 @@ export const AuthProvider = ({ children }) => {
       (response) => response,
       (error) => {
         const status = error?.response?.status;
+        const rawUrl = error?.config?.url || "";
+        // Normalize to a pathname for comparison regardless of absolute/relative URL
+        let path = "";
+        try {
+          path = new URL(rawUrl, BASE_API).pathname;
+        } catch (_) {
+          path = rawUrl;
+        }
+        // Do NOT auto-redirect on auth errors for login endpoints
+        if (path === "/api/login" || path === "/api/auth/login") {
+          return Promise.reject(error);
+        }
         if (status === 401 || status === 403) {
           sessionStorage.removeItem("token");
           sessionStorage.removeItem("user");
@@ -93,7 +105,13 @@ export const AuthProvider = ({ children }) => {
 
       return userData;
     } catch (error) {
-      throw new Error(error.response?.data?.message || "Login failed");
+      const status = error?.response?.status;
+      const apiMessage = error?.response?.data?.message;
+      const message = apiMessage || (status === 403 ? "Account deactivated. Please contact admin to activate." : "Login failed");
+      const err = new Error(message);
+      err.status = status;
+      err.apiPath = "/api/login";
+      throw err;
     }
   };
 
