@@ -183,6 +183,30 @@ class UserController {
       data: stats
     });
   });
+
+  /**
+   * Get team members (operators, analysts - no admins)
+   * GET /api/users/team
+   * Accessible by all authenticated users
+   */
+  getTeamMembers = asyncHandler(async (req, res) => {
+    // Get all users except super_admin
+    const filters = {
+      role: { $ne: 'super_admin' }
+    };
+    const options = {
+      sort: { username: 1 },
+      select: 'username email role status createdAt firstName lastName phoneNumber'
+    };
+
+    const result = await userService.getAllUsers(filters, options);
+
+    res.json({
+      success: true,
+      items: result.users,
+      total: result.total
+    });
+  });
 }
 
 module.exports = new UserController();

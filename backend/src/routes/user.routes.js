@@ -32,6 +32,13 @@ router.get('/me', userController.getCurrentUser);
 router.put('/me', validate(schemas.updateProfile), userController.updateCurrentUser);
 
 /**
+ * @route   GET /api/users/team
+ * @desc    Get team members (operators and analysts only, no admins)
+ * @access  All authenticated users (operators, analysts, admins)
+ */
+router.get('/team', userController.getTeamMembers);
+
+/**
  * @route   GET /api/users/count
  * @desc    Get total user count
  * @access  Super Admin

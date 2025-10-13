@@ -13,14 +13,12 @@ export default function OperatorUsers() {
   const load = async () => {
     try {
       setLoading(true);
-      const res = await api.listUsers();
-      // Operators see only non-admin users (other operators/analysts)
-      const filteredUsers = (res.items || []).filter(
-        (u) => u.role !== "super_admin"
-      );
-      setUsers(filteredUsers);
+      // Use team members endpoint (accessible by all users)
+      const res = await api.listTeamMembers();
+      // Team members already excludes admins on backend
+      setUsers(res.items || []);
     } catch (err) {
-      console.error("Failed to load users:", err);
+      console.error("Failed to load team members:", err);
     } finally {
       setLoading(false);
     }

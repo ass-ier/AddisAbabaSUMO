@@ -44,6 +44,8 @@ export const api = {
   // Users
   listUsers: async () =>
     fetchJson(`${BASE_API}/api/users`, { headers: authHeaders() }),
+  listTeamMembers: async () =>
+    fetchJson(`${BASE_API}/api/users/team`, { headers: authHeaders() }),
   createUser: async (body) =>
     fetchJson(`${BASE_API}/api/users`, {
       method: "POST",
