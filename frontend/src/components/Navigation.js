@@ -162,19 +162,21 @@ const Navigation = () => {
             <span className="link-text">Traffic Map</span>
           </Link>
 
-          <Link
-            to="/sumo-integration"
-            className={`sidebar-link ${
-              isActive("/sumo-integration") ? "active" : ""
-            }`}
-            onClick={closeMenu}
-            title="SUMO Integration"
-          >
-            <span className="link-icon">
-              <LinkIcon className="w-5 h-5" />
-            </span>
-            <span className="link-text">SUMO Integration</span>
-          </Link>
+          {(user?.role === "super_admin" || user?.role === "operator") && (
+            <Link
+              to="/sumo-integration"
+              className={`sidebar-link ${
+                isActive("/sumo-integration") ? "active" : ""
+              }`}
+              onClick={closeMenu}
+              title="SUMO Integration"
+            >
+              <span className="link-icon">
+                <LinkIcon className="w-5 h-5" />
+              </span>
+              <span className="link-text">SUMO Integration</span>
+            </Link>
+          )}
 
           {user?.role === "super_admin" && (
             <Link
