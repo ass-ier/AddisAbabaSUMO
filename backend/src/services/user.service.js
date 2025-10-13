@@ -145,7 +145,7 @@ class UserService {
   async getUsersByRole(role) {
     try {
       // Validate role
-      const validRoles = ['super_admin', 'operator', 'analyst'];
+      const validRoles = ['operator', 'analyst', 'super_admin'];
       if (!validRoles.includes(role)) {
         throw new AppError('Invalid role', 400);
       }
@@ -351,9 +351,9 @@ class UserService {
       const total = await userRepository.count();
       const active = await userRepository.count({ isActive: true });
       const byRole = {
-        super_admin: await userRepository.count({ role: 'super_admin' }),
         operator: await userRepository.count({ role: 'operator' }),
-        analyst: await userRepository.count({ role: 'analyst' })
+        analyst: await userRepository.count({ role: 'analyst' }),
+        super_admin: await userRepository.count({ role: 'super_admin' })
       };
 
       const stats = {

@@ -39,6 +39,11 @@ const schemas = {
     password: Joi.string().min(6).required(),
     role: Joi.string().valid('super_admin', 'operator', 'analyst').required(),
     region: Joi.string().max(100).optional().allow(''),
+    // Profile fields required by the User model
+    email: Joi.string().email().required(),
+    firstName: Joi.string().max(50).required(),
+    lastName: Joi.string().max(50).required(),
+    phoneNumber: Joi.string().pattern(/^[\+]?[1-9][\d]{0,15}$/).optional().allow('')
   }),
 
   updateUser: Joi.object({

@@ -79,8 +79,8 @@ router.get(
 /**
  * @route   POST /api/users
  * @desc    Create a new user
- * @body    { username, password, role, region }
- * @access  Super Admin only
+ * @body    { username, email, password, firstName, lastName, role, region }
+ * @access  Super Admin
  */
 router.post(
   '/',
@@ -111,7 +111,7 @@ router.put(
 /**
  * @route   DELETE /api/users/:id
  * @desc    Delete user by ID (soft delete)
- * @access  Super Admin only
+ * @access  Super Admin
  */
 router.delete(
   '/:id',

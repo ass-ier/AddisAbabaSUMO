@@ -1,15 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../utils/api";
 import "../components/UserManagement.css";
+import DebugAuth from "../components/DebugAuth";
 
 export default function UsersAdmin() {
   const [users, setUsers] = useState([]);
   const [filter, setFilter] = useState("");
   const [form, setForm] = useState({
+    firstName: "",
+    lastName: "",
     username: "",
+    email: "",
     password: "",
     role: "operator",
     region: "",
+    phoneNumber: "",
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -18,7 +23,11 @@ export default function UsersAdmin() {
     try {
       setLoading(true);
       const data = await api.listUsers();
-      setUsers(Array.isArray(data) ? data : []);
+      // Support both API shapes:
+      // - legacy: returns an array of users
+      // - new: returns { success: true, data: users, pagination: ... }
+      const usersList = Array.isArray(data) ? data : data?.data || [];
+      setUsers(Array.isArray(usersList) ? usersList : []);
       setMessage("");
     } catch (error) {
       console.error("Error loading users:", error);
@@ -36,10 +45,44 @@ export default function UsersAdmin() {
     e.preventDefault();
     setMessage("");
     try {
-      await api.createUser(form);
-      setForm({ username: "", password: "", role: "operator", region: "" });
+      const res = await api.createUser(form);
+      // Backend may return multiple shapes:
+      // - direct user object (res._id etc.)
+      // - envelope: { success: true, data: user }
+      // - envelope: { success: true, data: { ... }, pagination: ... }
+      let createdUser = null;
+      if (!res) {
+        createdUser = null;
+      } else if (res._id) {
+        // direct user object
+        createdUser = res;
+      } else if (res.data && res.data._id) {
+        createdUser = res.data;
+      } else if (res.data && Array.isArray(res.data)) {
+        // sometimes API may return list on create - fallback to reload
+        createdUser = null;
+      } else if (res.success && res.data) {
+        createdUser = res.data;
+      }
+
+      if (createdUser) {
+        setUsers((prev) => [createdUser, ...prev]);
+      } else {
+        await load();
+      }
+
+      setForm({
+        firstName: "", 
+        lastName: "", 
+        username: "", 
+        email: "", 
+        password: "", 
+        role: "operator", 
+        region: "", 
+        phoneNumber: "" 
+      });
       setMessage("User created successfully");
-      load();
+      // If we appended above, we've already updated the UI. Otherwise load() was called.
     } catch (error) {
       console.error("Error creating user:", error);
       setMessage(
@@ -50,14 +93,20 @@ export default function UsersAdmin() {
 
   const filtered = users.filter(
     (u) =>
-      !filter || u.username.includes(filter) || (u.role || "").includes(filter)
+      !filter || 
+      u.username.includes(filter) || 
+      (u.role || "").includes(filter) ||
+      (u.email || "").toLowerCase().includes(filter.toLowerCase()) ||
+      (u.firstName || "").toLowerCase().includes(filter.toLowerCase()) ||
+      (u.lastName || "").toLowerCase().includes(filter.toLowerCase()) ||
+      (u.region || "").toLowerCase().includes(filter.toLowerCase())
   );
 
   const getRoleBadge = (role) => {
     const roleColors = {
-      super_admin: "#FF5722",
       operator: "#4CAF50",
-      analyst: "#FF9800",
+      analyst: "#FF9800", 
+      super_admin: "#9C27B0",
     };
 
     return (
@@ -68,6 +117,13 @@ export default function UsersAdmin() {
         {role.replace("_", " ").toUpperCase()}
       </span>
     );
+  };
+
+  // Role color map (used for inline styling of the select)
+  const roleColors = {
+    operator: "#4CAF50",
+    analyst: "#FF9800",
+    super_admin: "#9C27B0",
   };
 
   const updateRole = async (id, newRole) => {
@@ -91,6 +147,7 @@ export default function UsersAdmin() {
 
   return (
     <div className="p-6">
+      <DebugAuth />
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
         <p className="text-gray-600">Admin - manage users</p>
@@ -112,6 +169,30 @@ export default function UsersAdmin() {
 
           <form onSubmit={submit}>
             <div className="form-group">
+              <label htmlFor="firstName">First Name:</label>
+              <input
+                type="text"
+                id="firstName"
+                placeholder="Enter first name"
+                value={form.firstName}
+                onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="lastName">Last Name:</label>
+              <input
+                type="text"
+                id="lastName"
+                placeholder="Enter last name"
+                value={form.lastName}
+                onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
               <label htmlFor="username">Username:</label>
               <input
                 type="text"
@@ -124,14 +205,27 @@ export default function UsersAdmin() {
             </div>
 
             <div className="form-group">
+              <label htmlFor="email">Email:</label>
+              <input
+                type="email"
+                id="email"
+                placeholder="Enter email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
               <label htmlFor="password">Password:</label>
               <input
                 type="password"
                 id="password"
-                placeholder="Enter password"
+                placeholder="Enter password (min 6 characters)"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 required
+                minLength={6}
               />
             </div>
 
@@ -145,6 +239,7 @@ export default function UsersAdmin() {
               >
                 <option value="operator">Operator</option>
                 <option value="analyst">Analyst</option>
+                <option value="super_admin">Super Admin</option>
               </select>
             </div>
 
@@ -156,6 +251,17 @@ export default function UsersAdmin() {
                 placeholder="Enter region (optional)"
                 value={form.region}
                 onChange={(e) => setForm({ ...form, region: e.target.value })}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="phoneNumber">Phone Number:</label>
+              <input
+                type="tel"
+                id="phoneNumber"
+                placeholder="Enter phone number (optional)"
+                value={form.phoneNumber}
+                onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })}
               />
             </div>
 
@@ -186,9 +292,12 @@ export default function UsersAdmin() {
                 <table>
                   <thead>
                     <tr>
+                      <th>Name</th>
                       <th>Username</th>
+                      <th>Email</th>
                       <th>Role</th>
                       <th>Region</th>
+                      <th>Status</th>
                       <th>Created At</th>
                       <th>Actions</th>
                     </tr>
@@ -196,21 +305,29 @@ export default function UsersAdmin() {
                   <tbody>
                     {filtered.map((userData) => (
                       <tr key={userData._id}>
+                        <td>{userData.firstName} {userData.lastName}</td>
                         <td>{userData.username}</td>
+                        <td>{userData.email}</td>
                         <td>
-                          {getRoleBadge(userData.role)}
                           <select
-                            className="ml-2"
+                            className="role-select"
                             value={userData.role}
-                            onChange={(e) =>
-                              updateRole(userData._id, e.target.value)
-                            }
+                            onChange={(e) => updateRole(userData._id, e.target.value)}
+                            style={{ backgroundColor: roleColors[userData.role] }}
                           >
                             <option value="operator">Operator</option>
                             <option value="analyst">Analyst</option>
+                            <option value="super_admin">Super Admin</option>
                           </select>
                         </td>
                         <td>{userData.region || "N/A"}</td>
+                        <td>
+                          <span className={`status-badge ${
+                            userData.isActive ? 'status-active' : 'status-inactive'
+                          }`}>
+                            {userData.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
                         <td>
                           {userData.createdAt
                             ? new Date(userData.createdAt).toLocaleDateString()

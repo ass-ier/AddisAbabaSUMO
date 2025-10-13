@@ -210,7 +210,7 @@ const requireAdminRole = (req, res, next) => {
     throw new AppError('Authentication required', 401);
   }
 
-  const allowedRoles = ['admin', 'super_admin'];
+  const allowedRoles = ['super_admin'];
   if (!allowedRoles.includes(req.user.role)) {
     logger.warn(
       `Unauthorized admin access attempt by ${req.user.username} (${req.user.role}) to ${req.originalUrl}`

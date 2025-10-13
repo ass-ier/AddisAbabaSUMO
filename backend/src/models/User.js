@@ -50,8 +50,8 @@ const UserSchema = new mongoose.Schema({
   // Role and permissions
   role: {
     type: String,
-    enum: ['super_admin', 'admin', 'system_operator', 'user'],
-    default: 'user',
+    enum: ['operator', 'analyst', 'super_admin'],
+    default: 'operator',
     required: true
   },
   
@@ -75,11 +75,12 @@ const UserSchema = new mongoose.Schema({
     default: Date.now
   },
   
-  // Additional metadata
-  department: {
+  // Additional metadata (optional region/area of operation)
+  region: {
     type: String,
     trim: true,
-    maxlength: [100, 'Department cannot exceed 100 characters']
+    maxlength: [100, 'Region cannot exceed 100 characters'],
+    default: ''
   },
   phoneNumber: {
     type: String,

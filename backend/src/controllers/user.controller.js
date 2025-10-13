@@ -87,13 +87,17 @@ class UserController {
    * Body: { username, password, role, region }
    */
   createUser = asyncHandler(async (req, res) => {
-    const { username, password, role, region } = req.body;
+    const { username, password, role, region, email, firstName, lastName, phoneNumber } = req.body;
 
     const user = await userService.createUser({
       username,
       password,
       role,
-      region
+      region,
+      email,
+      firstName,
+      lastName,
+      phoneNumber
     });
 
     res.status(201).json({

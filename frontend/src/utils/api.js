@@ -7,7 +7,9 @@ async function fetchJson(url, options = {}) {
     try {
       if (isJson) {
         const err = await res.json();
-        throw new Error(err?.message || `${res.status} ${res.statusText}`);
+        // Backend may return error text under different keys depending on implementation
+        const message = err?.message || err?.error || err?.errors || err?.msg || `${res.status} ${res.statusText}`;
+        throw new Error(message);
       } else {
         const text = await res.text();
         throw new Error(text || `${res.status} ${res.statusText}`);
@@ -37,7 +39,7 @@ export const api = {
   // Users
   listUsers: async () => fetchJson(`${BASE_API}/api/users`, { headers: authHeaders() }),
   createUser: async (body) =>
-    fetchJson(`${BASE_API}/api/register`, {
+    fetchJson(`${BASE_API}/api/users`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify(body),
@@ -167,13 +169,20 @@ export const api = {
 
 function authHeaders() {
   const token = sessionStorage.getItem("token");
-  return { Authorization: `Bearer ${token}` };
+  const headers = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 function jsonHeaders() {
   const token = sessionStorage.getItem("token");
-  return {
+  const headers = {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
   };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
 }

@@ -264,15 +264,54 @@ const requireAnyRole = (roles) => {
   };
 };
 
-// This is the correct endpoint for the "Create New User" form in UsersAdmin.jsx
+// User creation endpoint for admin panel
 app.post(
   "/api/users",
   authenticateToken,
   requireRole("super_admin"),
   async (req, res) => {
-    // Forward the request to the existing /api/register logic
-    // This ensures consistent user creation and cache invalidation logic
-    return app._router.handle(req, res);
+    try {
+  const { username, password, role, region, email, firstName, lastName, phoneNumber } = req.body;
+
+      // Check if user exists
+      const existingUser = await User.findOne({ username });
+      if (existingUser) {
+        return res.status(400).json({ message: "User already exists" });
+      }
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // Create user
+      const user = new User({
+        username,
+        email,
+        password: hashedPassword,
+        firstName,
+        lastName,
+        phoneNumber,
+        role,
+        region,
+      });
+
+      await user.save();
+
+      // Invalidate user list cache
+      try {
+        await redisClient.del("users_list");
+        console.log("Cache invalidated for: users_list");
+      } catch (e) {
+        console.error(
+          "Redis cache invalidation failed for users_list:",
+          e.message
+        );
+      }
+
+      await recordAudit(req, "create_user", username, { role, region });
+      res.status(201).json({ message: "User created successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Server error", error: error.message });
+    }
   }
 );
 
@@ -358,6 +397,7 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Public registration endpoint (for initial user setup only)
 app.post("/api/register", async (req, res) => {
   try {
     const { username, password, role, region } = req.body;
