@@ -4,10 +4,11 @@
   display: block;
   height: calc(100vh - 200px);
   min-height: 600px;
-  background: #f8f9fa;
+  background: var(--bg-secondary, #f8f9fa);
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 /* Map Controls */
@@ -19,49 +20,52 @@
   flex-wrap: wrap;
   align-items: center;
   margin-bottom: 12px;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--card, rgba(255, 255, 255, 0.95));
   padding: 12px 16px;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(10px);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .control-group {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #ffffff;
+  background: var(--bg, #ffffff);
   padding: 8px 10px;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   font-size: 14px;
   font-weight: 500;
+  transition: background-color 0.2s ease;
 }
 
 .control-group label {
-  color: #374151;
+  color: var(--text, #374151);
   white-space: nowrap;
 }
 
 .control-select {
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid #e0e0e0;
-  background: #fafafa;
+  border: 1px solid var(--border, #e0e0e0);
+  background: var(--input-bg, #fafafa);
+  color: var(--text, #1f2937);
   font-size: 14px;
   min-width: 120px;
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .control-select:focus {
   outline: none;
-  border-color: #4a6cf7;
+  border-color: var(--primary, #4a6cf7);
   box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.1);
 }
 
 .control-select:disabled {
-  background: #f3f4f6;
-  color: #9ca3af;
+  background: var(--input-disabled, #f3f4f6);
+  color: var(--text-muted, #9ca3af);
   cursor: not-allowed;
 }
 
@@ -658,6 +662,331 @@
 .leaflet-control-zoom a:hover {
   background: #f8f9fa;
   color: #1f2937;
+}
+
+/* =============================================================================
+   DARK MODE SUPPORT
+   =============================================================================
+   Professional dark mode styling for Traffic Map with enhanced readability,
+   proper contrast ratios, and seamless theme transitions.
+============================================================================= */
+
+/* Container & Background */
+.dark .traffic-map-container {
+  background: var(--bg, #0f172a);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+/* Map Controls */
+.dark .map-controls {
+  background: var(--card, rgba(30, 41, 59, 0.95));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+}
+
+.dark .control-group {
+  background: var(--bg, #1e293b);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.dark .control-group label {
+  color: var(--text, #f1f5f9);
+}
+
+/* Form Controls */
+.dark .control-select {
+  background: var(--input-bg, #1e293b);
+  color: var(--text, #f1f5f9);
+  border-color: var(--input-border, rgba(255, 255, 255, 0.1));
+}
+
+.dark .control-select:focus {
+  border-color: var(--primary, #60a5fa);
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+}
+
+.dark .control-select:disabled {
+  background: var(--input-disabled, #334155);
+  color: var(--text-muted, #64748b);
+}
+
+.dark .control-select option {
+  background: var(--card, #1e293b);
+  color: var(--text, #f1f5f9);
+}
+
+/* Buttons */
+.dark .refresh-btn {
+  background: var(--primary, #3b82f6);
+  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.3);
+}
+
+.dark .refresh-btn:hover:not(:disabled) {
+  background: var(--primary-hover, #2563eb);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+/* Map Wrapper */
+.dark .map-wrapper {
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Map Overlays - Legend */
+.dark .map-legend-overlay {
+  background: var(--card, rgba(30, 41, 59, 0.95));
+  color: var(--text, #f1f5f9);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.dark .legend-row {
+  color: var(--text, #f1f5f9);
+}
+
+/* Map KPIs Overlay */
+.dark .map-kpis-overlay {
+  background: var(--card, rgba(30, 41, 59, 0.95));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.dark .kpi {
+  background: var(--bg, #1e293b);
+  color: var(--text, #f1f5f9);
+}
+
+.dark .kpi-label {
+  color: var(--text-secondary, #cbd5e1);
+}
+
+.dark .kpi-value {
+  color: var(--text, #f1f5f9);
+}
+
+.dark .kpi-toggle {
+  background: var(--primary, #3b82f6);
+  color: white;
+}
+
+.dark .kpi-toggle:hover {
+  background: var(--primary-hover, #2563eb);
+}
+
+/* Popups */
+.dark .intersection-popup h3,
+.dark .emergency-popup h3 {
+  color: var(--text, #f1f5f9);
+}
+
+.dark .intersection-popup p,
+.dark .emergency-popup p {
+  color: var(--text-secondary, #cbd5e1);
+}
+
+.dark .intersection-popup strong {
+  color: var(--text, #f1f5f9);
+}
+
+.dark .popup-btn {
+  background: var(--primary, #3b82f6);
+}
+
+.dark .popup-btn:hover {
+  background: var(--primary-hover, #2563eb);
+}
+
+/* Sidebar (if used) */
+.dark .sidebar-section {
+  background: var(--card, #1e293b);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  border-bottom-color: var(--border, #334155);
+}
+
+.dark .sidebar-section h3 {
+  color: var(--text, #f1f5f9);
+}
+
+/* Summary Stats */
+.dark .stat-item {
+  background: var(--bg, #0f172a);
+}
+
+.dark .stat-label {
+  color: var(--text-secondary, #cbd5e1);
+}
+
+.dark .stat-value {
+  color: var(--text, #f1f5f9);
+}
+
+/* Intersection Details */
+.dark .intersection-details h4 {
+  color: var(--text, #f1f5f9);
+}
+
+.dark .detail-item {
+  border-bottom-color: var(--border, #334155);
+}
+
+.dark .detail-item span:first-child {
+  color: var(--text-secondary, #cbd5e1);
+}
+
+.dark .detail-item span:last-child {
+  color: var(--text, #f1f5f9);
+}
+
+/* Status Colors (maintain visibility) */
+.dark .status-normal {
+  color: #4ade80;
+}
+
+.dark .status-congested {
+  color: #fbbf24;
+}
+
+.dark .status-critical {
+  color: #f87171;
+}
+
+.dark .status-emergency {
+  color: #c084fc;
+}
+
+.dark .signal-green {
+  color: #4ade80;
+}
+
+.dark .signal-yellow {
+  color: #fbbf24;
+}
+
+.dark .signal-red {
+  color: #f87171;
+}
+
+/* Action Buttons */
+.dark .action-btn.primary {
+  background: var(--primary, #3b82f6);
+  color: white;
+}
+
+.dark .action-btn.primary:hover {
+  background: var(--primary-hover, #2563eb);
+}
+
+.dark .action-btn.secondary {
+  background: var(--bg, #1e293b);
+  color: var(--text, #f1f5f9);
+  border-color: var(--border, #475569);
+}
+
+.dark .action-btn.secondary:hover {
+  background: var(--card-hover, #334155);
+}
+
+/* Legend */
+.dark .legend-item {
+  color: var(--text, #f1f5f9);
+}
+
+.dark .legend-color {
+  border-color: var(--border, #334155);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* Loading States */
+.dark .loading-overlay {
+  background: rgba(15, 23, 42, 0.8);
+}
+
+.dark .loading-spinner {
+  border-color: var(--border, #334155);
+  border-top-color: var(--primary, #3b82f6);
+}
+
+/* Leaflet Control Overrides for Dark Mode */
+.dark .leaflet-control-zoom {
+  background: var(--card, #1e293b);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+}
+
+.dark .leaflet-control-zoom a {
+  background: var(--card, #1e293b);
+  color: var(--text, #f1f5f9);
+  border-bottom-color: var(--border, #334155);
+}
+
+.dark .leaflet-control-zoom a:hover {
+  background: var(--card-hover, #334155);
+  color: var(--text, #f1f5f9);
+}
+
+.dark .leaflet-popup-content-wrapper {
+  background: var(--card, #1e293b);
+  color: var(--text, #f1f5f9);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.dark .leaflet-popup-tip {
+  background: var(--card, #1e293b);
+}
+
+/* Intersection Dot Visibility in Dark Mode */
+.dark .intersection-dot {
+  border-color: var(--text, #f1f5f9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+/* Vehicle Icons - Enhanced Visibility */
+.dark .vehicle-icon {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+
+/* Traffic Light Enhancement for Dark Mode */
+.dark .traffic-signal .light-red.light-active {
+  filter: drop-shadow(0 0 8px rgba(248, 113, 113, 1));
+}
+
+.dark .traffic-signal .light-yellow.light-active {
+  filter: drop-shadow(0 0 8px rgba(251, 191, 36, 1));
+}
+
+.dark .traffic-signal .light-green.light-active {
+  filter: drop-shadow(0 0 8px rgba(74, 222, 128, 1));
+}
+
+/* Emergency Vehicle Enhanced Glow in Dark Mode */
+.dark .emergency-vehicle-icon {
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.6));
+}
+
+/* Legend Swatches */
+.dark .legend-swatch {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Enhanced TLS Icon in Dark Mode */
+.dark .enhanced-tls-icon:hover > div {
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.6);
+}
+
+/* Legend Title and Note */
+.legend-title {
+  color: #333;
+}
+
+.legend-note {
+  color: #666;
+}
+
+.dark .legend-title {
+  color: var(--text, #f1f5f9);
+}
+
+.dark .legend-note {
+  color: var(--text-secondary, #cbd5e1);
 }
 
 /* Leaflet lane polylines hover effect */

@@ -1488,7 +1488,10 @@ const TrafficMap = () => {
             </div>
           </div>
           <div className="legend" style={{ marginTop: 12 }}>
-            <div style={{ fontWeight: "bold", marginBottom: 8, color: "#333" }}>
+            <div
+              className="legend-title"
+              style={{ fontWeight: "bold", marginBottom: 8 }}
+            >
               Traffic Density Legend
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
@@ -1543,9 +1546,9 @@ const TrafficMap = () => {
               </div>
             </div>
             <div
+              className="legend-note"
               style={{
                 fontSize: "12px",
-                color: "#666",
                 marginTop: "8px",
                 fontStyle: "italic",
               }}
@@ -1553,11 +1556,11 @@ const TrafficMap = () => {
               * Colors change based on real-time vehicle count per road segment
             </div>
             <div
+              className="legend-title"
               style={{
                 fontWeight: "bold",
                 marginTop: 16,
                 marginBottom: 8,
-                color: "#333",
               }}
             >
               Emergency Vehicles
