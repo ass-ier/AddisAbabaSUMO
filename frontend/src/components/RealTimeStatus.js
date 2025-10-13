@@ -36,45 +36,72 @@ const RealTimeStatus = ({ className = "", showDetails = false }) => {
   };
 
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      <div className="flex items-center gap-1">
-        <span className="text-sm">{getStatusIcon()}</span>
-        <span className={`text-sm font-medium ${getStatusColor()}`}>
-          {getStatusText()}
-        </span>
+    <div className={`flex items-center justify-between w-full ${className}`}>
+      <div className="flex items-center gap-2">
+        {/* Status Indicator */}
+        <div
+          className={`relative flex items-center justify-center w-7 h-7 rounded-full ${
+            connected
+              ? "bg-green-100 dark:bg-green-900/30"
+              : connecting
+                ? "bg-yellow-100 dark:bg-yellow-900/30"
+                : "bg-red-100 dark:bg-red-900/30"
+          }`}
+        >
+          <span className="text-base leading-none">{getStatusIcon()}</span>
+          {connected && (
+            <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+            </span>
+          )}
+        </div>
+
+        {/* Status Text */}
+        {showDetails && (
+          <div className="flex flex-col">
+            <span
+              className={`text-xs font-semibold leading-tight ${
+                connected
+                  ? "text-green-700 dark:text-green-400"
+                  : connecting
+                    ? "text-yellow-700 dark:text-yellow-400"
+                    : "text-red-700 dark:text-red-400"
+              }`}
+            >
+              {getStatusText()}
+            </span>
+            {connected && lastUpdate && (
+              <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                {new Date(lastUpdate).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {showDetails && (
-        <>
-          {connected && lastUpdate && (
-            <span className="text-xs text-gray-500">
-              • Updated {new Date(lastUpdate).toLocaleTimeString()}
-            </span>
-          )}
-
-          {error && !connecting && (
-            <button
-              onClick={connect}
-              className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
-              title="Retry connection"
-            >
-              Retry
-            </button>
-          )}
-
-          {showDetails && connectionInfo.socketId && (
-            <span className="text-xs text-gray-400" title="Socket ID">
-              ID: {connectionInfo.socketId.slice(-6)}
-            </span>
-          )}
-        </>
-      )}
-
-      {connected && (
-        <div
-          className="w-2 h-2 bg-green-500 rounded-full animate-pulse"
-          title="Live data updates active"
-        />
+      {/* Retry Button (collapsed state) */}
+      {!showDetails && error && !connecting && (
+        <button
+          onClick={connect}
+          className="flex items-center justify-center w-7 h-7 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+          title="Retry connection"
+          aria-label="Retry connection"
+        >
+          <svg
+            className="w-3.5 h-3.5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+        </button>
       )}
     </div>
   );
