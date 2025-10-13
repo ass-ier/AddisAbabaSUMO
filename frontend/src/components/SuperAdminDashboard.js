@@ -6,14 +6,13 @@ import "./Dashboard.css";
 
 const SuperAdminDashboard = () => {
   const { user } = useAuth();
-  const roleLabel =
-    user?.role === "super_admin"
-      ? "Super Admin"
-      : user?.role === "operator"
-        ? "Operator"
-        : user?.role === "analyst"
-          ? "Analyst"
-          : "User";
+  const roleLabel = user?.role === "super_admin"
+    ? "Super Admin"
+    : user?.role === "operator"
+      ? "Operator"
+      : user?.role === "analyst"
+        ? "Analyst"
+        : "User";
 
   const [stats, setStats] = useState({
     userCount: 0,
@@ -171,7 +170,17 @@ const SuperAdminDashboard = () => {
                     {stat.title}
                   </p>
                   <p
-                    className={`text-2xl font-bold ${stat.title === "System Health" ? (stats.systemHealth >= 80 ? "text-green-700" : stats.systemHealth >= 60 ? "text-yellow-700" : "text-red-700") : ""}`}
+                    className={`text-2xl font-bold ${
+                      stat.title === "System Health"
+                        ? (
+                            stats.systemHealth >= 80
+                              ? "text-green-700"
+                              : stats.systemHealth >= 60
+                                ? "text-yellow-700"
+                                : "text-red-700"
+                          )
+                        : ""
+                    }`}
                   >
                     {stat.value}
                   </p>

@@ -983,6 +983,19 @@ const TrafficMap = () => {
 
   // Handle traffic light click
   const handleTlsClick = (tlsId, tlsData) => {
+    if (!canOverride) {
+      try {
+        window.dispatchEvent(
+          new CustomEvent('notify', {
+            detail: {
+              type: 'error',
+              message: 'Access denied: your role cannot control traffic lights.',
+            },
+          })
+        );
+      } catch (_) {}
+      return;
+    }
     setSelectedTlsId(tlsId);
     setIsModalOpen(true);
   };

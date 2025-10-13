@@ -85,7 +85,11 @@ function AppContent() {
           <Route
             path="/sumo-integration"
             element={
-              user && (user.role === "super_admin" || user.role === "operator") ? (
+              user &&
+              (
+                user.role === "super_admin" ||
+                user.role === "operator"
+              ) ? (
                 <SUMOIntegration />
               ) : (
                 <Navigate to="/dashboard" />
@@ -109,7 +113,12 @@ function AppContent() {
           <Route
             path="/admin/audit"
             element={
-              user && (user.role === "super_admin" || user.role === "analyst" || user.role === "operator") ? (
+              user &&
+              (
+                user.role === "super_admin" ||
+                user.role === "analyst" ||
+                user.role === "operator"
+              ) ? (
                 <AuditLogs />
               ) : (
                 <Navigate to="/dashboard" />

@@ -8,7 +8,10 @@ class StatsController {
    */
   async getKPIs(req, res) {
     try {
-      const kpis = await statsService.getKPIs();
+      const { startDate, endDate } = req.query || {};
+      const end = endDate ? new Date(endDate) : new Date();
+      const start = startDate ? new Date(startDate) : new Date(end.getTime() - 24 * 60 * 60 * 1000);
+      const kpis = await statsService.getKPIs({ start, end });
       res.json(kpis);
     } catch (error) {
       logger.error('Error in getKPIs', { error: error.message });
@@ -25,7 +28,10 @@ class StatsController {
    */
   async getTrends(req, res) {
     try {
-      const trends = await statsService.getTrends();
+      const { startDate, endDate } = req.query || {};
+      const end = endDate ? new Date(endDate) : new Date();
+      const start = startDate ? new Date(startDate) : new Date(end.getTime() - 24 * 60 * 60 * 1000);
+      const trends = await statsService.getTrends({ start, end });
       res.json(trends);
     } catch (error) {
       logger.error('Error in getTrends', { error: error.message });

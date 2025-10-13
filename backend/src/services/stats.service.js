@@ -13,9 +13,11 @@ class StatsService {
   /**
    * Get KPIs (Key Performance Indicators)
    */
-  async getKPIs() {
+  async getKPIs({ start, end } = {}) {
     try {
-      const cacheKey = 'reports_kpis';
+      const sIso = (start instanceof Date ? start : new Date(Date.now() - 24 * 60 * 60 * 1000)).toISOString();
+      const eIso = (end instanceof Date ? end : new Date()).toISOString();
+      const cacheKey = `reports_kpis_${sIso}_${eIso}`;
       
       // Try to get from cache
       const cached = await cacheService.get(cacheKey);
@@ -24,16 +26,17 @@ class StatsService {
         return cached;
       }
 
-      // Fetch latest traffic data
-      const latest = await trafficRepository.getLatest(100);
+      // Fetch traffic data in range
+      const query = { timestamp: { $gte: new Date(sIso), $lte: new Date(eIso) } };
+      const latest = await TrafficData.find(query).sort({ timestamp: -1 }).limit(5000);
       
       // Calculate average speed
       const avgSpeed = latest.length > 0
-        ? Number((latest.reduce((acc, d) => acc + (d.averageSpeed || 0), 0) / latest.length).toFixed(1))
+        ? Number((latest.reduce((acc, d) => acc + (Number(d.averageSpeed) || 0), 0) / latest.length).toFixed(1))
         : 0;
 
       const kpis = {
-        uptime: 99.9,
+        uptime: latest.length > 0 ? 100 : 0,
         congestionReduction: 15.2,
         avgResponse: 24,
         avgSpeed
@@ -53,9 +56,13 @@ class StatsService {
   /**
    * Get trends (daily/weekly analysis)
    */
-  async getTrends() {
+  async getTrends({ start, end } = {}) {
     try {
-      const cacheKey = 'reports_trends';
+      const s = start instanceof Date ? start : new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const e = end instanceof Date ? end : new Date();
+      const sIso = s.toISOString();
+      const eIso = e.toISOString();
+      const cacheKey = `reports_trends_${sIso}_${eIso}`;
       
       // Try to get from cache
       const cached = await cacheService.get(cacheKey);
@@ -64,9 +71,8 @@ class StatsService {
         return cached;
       }
 
-      // Get data from last 7 days
-      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const data = await TrafficData.find({ timestamp: { $gte: since } });
+      // Get data within range
+      const data = await TrafficData.find({ timestamp: { $gte: s, $lte: e } });
 
       // Group by day
       const byDay = {};
@@ -75,10 +81,10 @@ class StatsService {
         if (!byDay[key]) {
           byDay[key] = { day: key, avgSpeed: 0, count: 0, emergencies: 0 };
         }
-        byDay[key].avgSpeed += d.averageSpeed || 0;
+        byDay[key].avgSpeed += Number(d.averageSpeed) || 0;
         byDay[key].count += 1;
         // Naive emergencies proxy using high trafficFlow
-        if ((d.trafficFlow || 0) > 1000) byDay[key].emergencies += 1;
+        if ((Number(d.trafficFlow) || 0) > 1000) byDay[key].emergencies += 1;
       });
 
       const daily = Object.values(byDay).map(x => ({
