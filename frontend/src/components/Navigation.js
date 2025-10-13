@@ -210,9 +210,9 @@ const Navigation = () => {
                 <span className="link-text">Emergencies</span>
               </Link>
               <Link
-                to="/operator/audit"
+                to="/admin/audit"
                 className={`sidebar-link ${
-                  isActive("/operator/audit") ? "active" : ""
+                  isActive("/admin/audit") ? "active" : ""
                 }`}
                 onClick={closeMenu}
                 title="Activity Log"

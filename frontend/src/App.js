@@ -149,10 +149,10 @@ function AppContent() {
           <Route
             path="/operator/audit"
             element={
-              user && user.role !== "super_admin" ? (
-                <OperatorAuditLogs />
+              user ? (
+                <Navigate to="/admin/audit" />
               ) : (
-                <Navigate to="/dashboard" />
+                <Navigate to="/login" />
               )
             }
           />
