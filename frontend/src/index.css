@@ -9,23 +9,23 @@
   --bg-secondary: #f1f5f9;
   --card: #ffffff;
   --card-hover: #f8fafc;
-  
+
   /* Borders */
   --border: #e2e8f0;
   --border-light: #f1f5f9;
-  
+
   /* Text */
   --text: #0f172a;
   --text-secondary: #475569;
   --text-muted: #64748b;
   --text-placeholder: #94a3b8;
-  
+
   /* Brand Colors */
   --primary: #3b82f6;
   --primary-hover: #2563eb;
   --primary-light: #dbeafe;
   --primary-contrast: #ffffff;
-  
+
   /* Status Colors */
   --success: #10b981;
   --success-light: #d1fae5;
@@ -35,18 +35,20 @@
   --error-light: #fee2e2;
   --info: #3b82f6;
   --info-light: #dbeafe;
-  
+
   /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-  
+  --shadow-md:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+
   /* Tables */
   --table-header: #f8fafc;
   --table-row-hover: #f1f5f9;
   --table-border: #e2e8f0;
-  
+
   /* Inputs */
   --input-bg: #ffffff;
   --input-border: #cbd5e1;
@@ -57,28 +59,28 @@
 /* Dark Mode Theme */
 :root[data-theme="dark"],
 .dark {
-  /* Backgrounds */
+  /* Backgrounds - Use same dark background for everything */
   --bg: #0f172a;
-  --bg-secondary: #1e293b;
-  --card: #1e293b;
-  --card-hover: #334155;
-  
+  --bg-secondary: #0f172a;
+  --card: #0f172a;
+  --card-hover: #0f172a;
+
   /* Borders - Make them transparent to avoid frames */
   --border: transparent;
   --border-light: transparent;
-  
+
   /* Text */
   --text: #f1f5f9;
   --text-secondary: #cbd5e1;
   --text-muted: #94a3b8;
   --text-placeholder: #64748b;
-  
+
   /* Brand Colors */
   --primary: #60a5fa;
   --primary-hover: #3b82f6;
   --primary-light: #1e3a8a;
   --primary-contrast: #0f172a;
-  
+
   /* Status Colors */
   --success: #34d399;
   --success-light: #064e3b;
@@ -88,18 +90,20 @@
   --error-light: #7f1d1d;
   --info: #60a5fa;
   --info-light: #1e3a8a;
-  
+
   /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
   --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px -1px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
-  
+  --shadow-md:
+    0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg:
+    0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+
   /* Tables */
   --table-header: #1e293b;
   --table-row-hover: #334155;
   --table-border: transparent;
-  
+
   /* Inputs */
   --input-bg: #1e293b;
   --input-border: rgba(255, 255, 255, 0.1);
@@ -118,8 +122,11 @@ body,
 *,
 *::before,
 *::after {
-  transition: background-color 0.2s ease, color 0.2s ease,
-    border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 /* Remove transition for reduced motion */
@@ -137,17 +144,78 @@ body,
   box-shadow: var(--shadow-sm);
 }
 
-/* Remove ALL card borders and frames in dark mode */
+/* ===== DARK MODE: REMOVE ALL BORDERS AND FRAMES ===== */
+/* The goal: Only background should be dark, text should be light, NO BORDERS */
+
+/* Remove borders from all elements */
+:root[data-theme="dark"] *:not(input):not(select):not(textarea):not(button),
+.dark *:not(input):not(select):not(textarea):not(button) {
+  border-color: transparent !important;
+}
+
+/* Specific overrides for common cases */
 .dark .card,
-.dark .shadow-card {
+.dark .shadow-card,
+.dark [class*="card"],
+.dark [class*="border"],
+.dark div,
+.dark section,
+.dark article,
+.dark aside,
+.dark header,
+.dark footer,
+.dark nav,
+.dark main,
+.dark table,
+.dark tr,
+.dark td,
+.dark th {
+  border: none !important;
+  border-color: transparent !important;
+}
+
+/* Remove Tailwind border utilities */
+.dark [class*="border-"],
+.dark .border,
+.dark .border-t,
+.dark .border-r,
+.dark .border-b,
+.dark .border-l,
+.dark .border-x,
+.dark .border-y {
+  border-color: transparent !important;
+  border-width: 0 !important;
+}
+
+/* Keep only form input borders subtle for usability */
+.dark input:not([type="button"]):not([type="submit"]),
+.dark select,
+.dark textarea {
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Buttons should have no border in dark mode */
+.dark button,
+.dark input[type="button"],
+.dark input[type="submit"] {
   border: none !important;
 }
 
-/* Also remove from Tailwind utility classes */
-.dark .border,
-.dark .border-2,
-.dark [class*="border-"] {
-  border-color: transparent !important;
+/* Remove ALL shadows in dark mode - completely flat design */
+:root[data-theme="dark"] *,
+.dark * {
+  box-shadow: none !important;
+}
+
+/* Remove shadow utility classes */
+.dark .shadow,
+.dark .shadow-sm,
+.dark .shadow-md,
+.dark .shadow-lg,
+.dark .shadow-xl,
+.dark .shadow-2xl,
+.dark [class*="shadow"] {
+  box-shadow: none !important;
 }
 
 .card:hover {
