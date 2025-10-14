@@ -40,6 +40,26 @@ const Login = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  // Force light mode on login page
+  useEffect(() => {
+    // Save current theme to restore later
+    const savedTheme = document.documentElement.getAttribute('data-theme');
+    
+    // Force light mode
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.documentElement.classList.remove('dark');
+    
+    // Cleanup: restore theme when component unmounts (user logs in or navigates away)
+    return () => {
+      if (savedTheme) {
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        if (savedTheme === 'dark') {
+          document.documentElement.classList.add('dark');
+        }
+      }
+    };
+  }, []);
+
   // Clear messages when user changes input
   useEffect(() => {
     if (error || success) {
@@ -604,8 +624,9 @@ const Login = () => {
                   type="button"
                   onClick={handleSendResetOTP}
                   disabled={isLoading || !identifier}
+                  className="btn-secondary"
                 >
-                  {isLoading ? "Sending..." : "Send Verification Code"}
+                  Send Verification Code
                 </button>
               </>
             )}
