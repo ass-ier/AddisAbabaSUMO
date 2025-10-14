@@ -19,6 +19,7 @@ const auditRoutes = require('./audit.routes');
 const statsRoutes = require('./stats.routes');
 const operatorRoutes = require('./operator.routes');
 const createSumoTlsRoutes = require('./sumo-tls.routes'); // SUMO/TLS routes with subprocess management
+const otpRoutes = require('../../routes/otp'); // OTP verification routes
 
 module.exports = function createRoutes(dependencies = {}) {
   const router = express.Router();
@@ -28,10 +29,90 @@ module.exports = function createRoutes(dependencies = {}) {
 const authController = require('../controllers/auth.controller');
 const { authenticateToken } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
+const User = require('../models/User');
+const AuditLog = require('../models/AuditLog');
+const otpService = require('../services/otp.service');
 
 router.post('/login', validate(schemas.login), authController.login);
 router.post('/logout', authenticateToken, authController.logout);
 router.post('/register', validate(schemas.register), authController.register);
+
+// Password reset endpoint
+router.post('/reset-password', async (req, res) => {
+  try {
+    console.log('\n🔑 PASSWORD RESET REQUEST RECEIVED');
+    console.log('Request body:', req.body);
+    
+    const { identifier, newPassword, otpVerified } = req.body;
+
+    if (!identifier || !newPassword) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
+
+    // Require OTP verification before password reset
+    if (!otpVerified) {
+      console.log('❌ Password reset failed: OTP not verified');
+      return res.status(400).json({ 
+        message: "OTP verification is required for password reset" 
+      });
+    }
+
+    // Verify that OTP was actually verified for this identifier
+    console.log(`🔍 Checking OTP verification for: ${identifier}`);
+    const isVerified = await otpService.isVerified(identifier, 'password_reset');
+    console.log(`OTP verified in DB: ${isVerified}`);
+    
+    if (!isVerified) {
+      console.log('❌ OTP verification not found in database');
+      return res.status(400).json({ 
+        message: "Please verify your OTP before resetting password" 
+      });
+    }
+
+    console.log('✅ OTP verification confirmed, finding user...');
+    
+    // Find user
+    const user = await User.findOne({
+      $or: [{ email: identifier }, { phoneNumber: identifier }]
+    });
+
+    if (!user) {
+      console.log('❌ User not found with identifier:', identifier);
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    console.log(`✅ User found: ${user.username}, updating password...`);
+
+    // Validate new password
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters long" });
+    }
+
+    // Hash and update password
+    user.password = newPassword; // Will be hashed by pre-save hook
+    await user.save();
+
+    // Clean up verified OTP
+    await otpService.cleanupVerifiedOTP(identifier, 'password_reset');
+
+    // Record audit
+    try {
+      await AuditLog.create({
+        user: user.username,
+        role: user.role,
+        action: "password_reset",
+        target: String(user._id),
+        meta: { method: 'otp' },
+      });
+    } catch (_) {}
+
+    console.log('✅ Password reset successful for user:', user.username);
+    res.json({ message: "Password reset successfully" });
+  } catch (error) {
+    console.error('❌ Reset password error:', error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -41,6 +122,7 @@ router.use('/settings', settingsRoutes);
 router.use('/emergencies', emergencyRoutes);
 router.use('/audit', auditRoutes);
 router.use('/operator', operatorRoutes); // Operator-specific routes for system monitoring and control
+router.use('/otp', otpRoutes); // OTP verification routes for registration and password reset
 router.use('/', statsRoutes); // Stats routes include /reports/* and /stats/*
 
 // Mount SUMO/TLS routes if dependencies are provided
