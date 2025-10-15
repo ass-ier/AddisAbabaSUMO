@@ -120,7 +120,7 @@ module.exports = function createSumoTlsRoutes(dependencies) {
       
       const { tls_id, action, phaseIndex } = req.body || {};
       
-      if (!tls_id || !action || !['next', 'prev', 'set'].includes(action)) {
+      if (!tls_id || !action || !['next', 'prev', 'set', 'resume', 'reset'].includes(action)) {
         return res.status(400).json({ message: 'Invalid parameters' });
       }
       

@@ -30,6 +30,7 @@ const TrafficLightModal = ({
   const [selectedPhase, setSelectedPhase] = useState(null);
   const [availablePhases, setAvailablePhases] = useState([]);
   const [error, setError] = useState(null);
+  const [overrideActive, setOverrideActive] = useState(false);
 
   const canOverride = user && ["super_admin", "operator"].includes(user.role);
 
@@ -44,6 +45,8 @@ const TrafficLightModal = ({
   // Load TLS configurations when modal opens
   useEffect(() => {
     if (isOpen && tlsId) {
+      // Reset override flag on open
+      setOverrideActive(false);
       loadTlsConfigurations()
         .then((configs) => {
           console.log("TLS configs loaded:", configs);
@@ -129,7 +132,7 @@ const TrafficLightModal = ({
       setSelectedPhase(phaseIndex);
 
       // Additionally force the exact R/Y/G state for the selected phase (if we know it)
-      // This avoids timing/program quirks and ensures the GUI reflects the change immediately
+      // This gives an immediate visible change when overriding
       const programPhases = program?.phases || [];
       const desiredState = programPhases.find((p) => p.index === phaseIndex)?.state
         || availablePhases.find((p) => p.index === phaseIndex)?.state;
@@ -137,10 +140,12 @@ const TrafficLightModal = ({
         try {
           await api.tlsSetState(tlsId, desiredState);
           console.log("TLS state forced successfully to:", desiredState);
+          setOverrideActive(true);
         } catch (forceErr) {
           console.warn("TLS set-state fallback failed:", forceErr?.message || forceErr);
         }
       }
+
 
       // Show success notification
       window.dispatchEvent(
@@ -237,12 +242,17 @@ const TrafficLightModal = ({
   const nextPhaseData = availablePhases.find((p) => p.index === nextPhaseIndex);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={() => { if (!overrideActive) onClose(); }}>
       <div className="traffic-light-modal" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="modal-header">
           <h2>Traffic Light Status</h2>
-          <button className="close-btn" onClick={onClose}>
+          <button
+            className="close-btn"
+            onClick={() => { if (!overrideActive) onClose(); }}
+            disabled={overrideActive}
+            title={overrideActive ? 'Resume normal flow to close' : ''}
+          >
             ×
           </button>
         </div>
@@ -333,6 +343,7 @@ const TrafficLightModal = ({
                 </button>
               </div>
 
+
               {/* Phase Selection Grid */}
               <div className="phase-selection">
                 <h5>Select Phase:</h5>
@@ -413,6 +424,125 @@ const TrafficLightModal = ({
             <div className="loading-overlay">
               <div className="loading-spinner">⟳</div>
               <span>Updating...</span>
+            </div>
+          )}
+
+          {/* Override blocker popup - appears only while manual override is active */}
+          {overrideActive && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: 'rgba(0,0,0,0.45)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 2000,
+              }}
+            >
+              <div
+                style={{
+                  background: 'white',
+                  borderRadius: 8,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+                  width: 420,
+                  maxWidth: '90%',
+                  padding: 16,
+                  border: '1px solid #e5e7eb',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 18 }}>⚠️</span>
+                  <h4 style={{ margin: 0 }}>Manual override active</h4>
+                </div>
+                <div style={{ color: '#374151', fontSize: 14, lineHeight: 1.5 }}>
+                  The normal signal program for this traffic light is currently overridden.
+                  You must resume the normal phase flow to continue.
+                </div>
+                <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button
+                    className="control-btn"
+                    onClick={async () => {
+                      try {
+                        if (!canOverride) {
+                          console.warn('Resume blocked: no override permission');
+                          return;
+                        }
+                        // Determine a safe phase index to resume
+                        const phaseIdx = (typeof currentPhaseIndex === 'number')
+                          ? currentPhaseIndex
+                          : (typeof selectedPhase === 'number')
+                            ? selectedPhase
+                            : (Array.isArray(program?.phases) && program.phases.length > 0)
+                              ? (program.phases[0].index ?? 0)
+                              : 0;
+                        console.log('Resuming normal phase flow:', { tlsId, phaseIdx, currentPhaseIndex, selectedPhase });
+
+                        setLoading(true);
+                        await api.tlsResume(tlsId);
+                        setOverrideActive(false);
+                        window.dispatchEvent(
+                          new CustomEvent('notify', {
+                            detail: {
+                              type: 'success',
+                              message: 'Continuing normal phase flow',
+                            },
+                          })
+                        );
+                      } catch (err) {
+                        console.error('Resume normal flow failed:', err);
+                        window.dispatchEvent(
+                          new CustomEvent('notify', {
+                            detail: {
+                              type: 'error',
+                              message: err?.message || 'Failed to continue normal flow',
+                            },
+                          })
+                        );
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading}
+                    style={{ padding: '8px 12px', background: '#1976D2', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+                  >
+                    ▶ Continue normal phase flow
+                  </button>
+                  <button
+                    className="control-btn"
+                    onClick={async () => {
+                      try {
+                        if (!canOverride) return;
+                        console.log('Resetting to normal program:', { tlsId });
+                        setLoading(true);
+                        await api.tlsReset(tlsId);
+                        setOverrideActive(false);
+                        window.dispatchEvent(
+                          new CustomEvent('notify', {
+                            detail: { type: 'success', message: 'Reset to normal schedule' },
+                          })
+                        );
+                      } catch (err) {
+                        console.error('Reset normal schedule failed:', err);
+                        window.dispatchEvent(
+                          new CustomEvent('notify', {
+                            detail: { type: 'error', message: err?.message || 'Failed to reset schedule' },
+                          })
+                        );
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading}
+                    style={{ padding: '8px 12px', background: '#6B7280', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+                  >
+                    ⟲ Reset to normal schedule
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

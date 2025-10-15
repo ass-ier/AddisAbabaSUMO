@@ -391,6 +391,105 @@ def main():
                 except Exception as e:
                     print(json.dumps({"type": "log", "level": "error", "message": f"TLS {tls_id}: set failed: {e}"}))
                     sys.stdout.flush()
+            elif action == 'resume':
+                try:
+                    # Re-attach to the current program and allow automatic progression
+                    prog_id = traci.trafficlight.getProgram(tls_id)
+                    cur = traci.trafficlight.getPhase(tls_id)
+                    num = traci.trafficlight.getPhaseNumber(tls_id)
+
+                    # Compute remaining time using nextSwitch; if invalid, fall back to nominal
+                    nominal_duration = 30
+                    remaining = 0
+                    try:
+                        sim_t = float(traci.simulation.getTime())
+                        next_sw = float(traci.trafficlight.getNextSwitch(tls_id))
+                        remaining = max(0.0, next_sw - sim_t)
+                    except Exception:
+                        remaining = 0
+
+                    try:
+                        defs = traci.trafficlight.getCompleteRedYellowGreenDefinition(tls_id)
+                        chosen = None
+                        for lg in defs:
+                            pid = getattr(lg, 'programID', getattr(lg, 'programID', None))
+                            if pid == prog_id or chosen is None:
+                                chosen = lg
+                        if chosen is not None and 0 <= cur < len(chosen.phases):
+                            nominal_duration = float(getattr(chosen.phases[cur], 'duration', 30) or 30)
+                    except Exception:
+                        pass
+
+                    # If remaining looks invalid (0 or huge), use nominal
+                    resume_duration = nominal_duration
+                    try:
+                        if 0 < remaining < 3600:
+                            resume_duration = remaining
+                    except Exception:
+                        pass
+
+                    print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: resuming program '{prog_id}' at phase {cur} with duration {resume_duration}s (nominal={nominal_duration}, remaining={remaining})"}))
+                    sys.stdout.flush()
+
+                    # Re-apply program and phase to leave manual state mode
+                    try:
+                        traci.trafficlight.setProgram(tls_id, prog_id)
+                    except Exception:
+                        pass
+                    # Clamp current phase index
+                    if num <= 0:
+                        num = 1
+                    cur = max(0, min(cur, num - 1))
+                    traci.trafficlight.setPhase(tls_id, cur)
+                    # Seed a small duration if resume_duration is 0 to ensure countdown begins
+                    traci.trafficlight.setPhaseDuration(tls_id, max(1.0, float(resume_duration)))
+
+                    # Advance simulation one step for immediate GUI update
+                    traci.simulationStep()
+
+                    # Emit immediate TLS update
+                    try:
+                        emit_tls_update(tls_id)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    print(json.dumps({"type": "log", "level": "error", "message": f"TLS {tls_id}: resume failed: {e}"}))
+                    sys.stdout.flush()
+            elif action == 'reset':
+                try:
+                    # Reset controller to the first available program/phase
+                    defs = traci.trafficlight.getCompleteRedYellowGreenDefinition(tls_id)
+                    prog_id = None
+                    nominal = 30
+                    if defs and len(defs) > 0:
+                        chosen = defs[0]
+                        prog_id = getattr(chosen, 'programID', getattr(chosen, 'programID', '0'))
+                        try:
+                            first = chosen.phases[0]
+                            nominal = float(getattr(first, 'duration', 30) or 30)
+                        except Exception:
+                            pass
+                    if prog_id is None:
+                        try:
+                            prog_id = traci.trafficlight.getProgram(tls_id)
+                        except Exception:
+                            prog_id = '0'
+                    print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: resetting to program '{prog_id}' phase 0 with duration {nominal}s"}))
+                    sys.stdout.flush()
+                    try:
+                        traci.trafficlight.setProgram(tls_id, prog_id)
+                    except Exception:
+                        pass
+                    traci.trafficlight.setPhase(tls_id, 0)
+                    traci.trafficlight.setPhaseDuration(tls_id, max(1.0, float(nominal)))
+                    traci.simulationStep()
+                    try:
+                        emit_tls_update(tls_id)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    print(json.dumps({"type": "log", "level": "error", "message": f"TLS {tls_id}: reset failed: {e}"}))
+                    sys.stdout.flush()
             else:
                 print(json.dumps({"type": "log", "level": "warn", "message": f"Unknown TLS action: {action}"}))
                 sys.stdout.flush()
