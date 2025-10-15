@@ -351,7 +351,13 @@ async function recordAudit(req, action, target, meta = {}) {
 // Initialize default users via shared initializer
 const initializeUsers = require("./init-users");
 
+// Import OTP routes
+const otpRoutes = require('./routes/otp');
+
 // Routes
+
+// Mount OTP routes
+app.use('/api/otp', otpRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {

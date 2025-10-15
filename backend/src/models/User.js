@@ -85,7 +85,7 @@ const UserSchema = new mongoose.Schema({
   phoneNumber: {
     type: String,
     trim: true,
-    match: [/^[\+]?[1-9][\d]{0,15}$/, 'Please enter a valid phone number']
+    match: [/^[\+]?[0-9][\d]{0,15}$/, 'Please enter a valid phone number']
   },
   
   // System metadata
@@ -196,5 +196,11 @@ UserSchema.statics.findByRole = function(role, activeOnly = true) {
 UserSchema.virtual('displayName').get(function() {
   return this.getFullName();
 });
+
+// Clear any cached model to ensure schema changes are applied
+if (mongoose.models.User) {
+  delete mongoose.models.User;
+  delete mongoose.connection.models.User;
+}
 
 module.exports = mongoose.model('User', UserSchema);

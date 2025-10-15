@@ -43,7 +43,7 @@ const schemas = {
     email: Joi.string().email().required(),
     firstName: Joi.string().max(50).required(),
     lastName: Joi.string().max(50).required(),
-    phoneNumber: Joi.string().pattern(/^[\+]?[1-9][\d]{0,15}$/).optional().allow('')
+    phoneNumber: Joi.string().pattern(/^[\+]?[0-9][\d]{0,15}$/).optional().allow('')
   }),
 
   updateUser: Joi.object({

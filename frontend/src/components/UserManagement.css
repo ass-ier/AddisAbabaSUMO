@@ -310,3 +310,88 @@
     justify-content: center;
   }
 }
+
+/* OTP Verification Section */
+.otp-section {
+  margin: 24px 0;
+  padding: 20px;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.otp-section h3 {
+  margin: 0 0 16px 0;
+  color: #495057;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.warning-box {
+  background: #fff3cd;
+  color: #856404;
+  padding: 12px 16px;
+  border-radius: 6px;
+  border: 1px solid #ffeaa7;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.success-box {
+  background: #d4edda;
+  color: #155724;
+  padding: 12px 16px;
+  border-radius: 6px;
+  border: 1px solid #c3e6cb;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-secondary.loading {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.btn-primary:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.otp-verify p {
+  margin: 0 0 16px 0;
+  color: #6c757d;
+  font-size: 14px;
+}
+
+/* Send OTP Button */
+.send-otp-btn {
+  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+  width: fit-content;
+}
+
+.send-otp-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+}
+
+.send-otp-btn:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}

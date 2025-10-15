@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../utils/api";
+import OTPInput from "../components/OTPInput";
 import "../components/UserManagement.css";
 
 export default function UsersAdmin() {
@@ -18,6 +19,12 @@ export default function UsersAdmin() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [pwdModal, setPwdModal] = useState({ open: false, username: "", pwd: "" });
+  
+  // OTP-related state
+  const [showOTP, setShowOTP] = useState(false);
+  const [otpIdentifier, setOtpIdentifier] = useState("");
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [sendingOTP, setSendingOTP] = useState(false);
 
   const load = async () => {
     try {
@@ -41,9 +48,71 @@ export default function UsersAdmin() {
     load();
   }, []);
 
+  const sendOTP = async (email) => {
+    // Validate email before sending
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setMessage("Please enter a valid email address");
+      return;
+    }
+    
+    setSendingOTP(true);
+    setMessage("");
+    
+    try {
+      const response = await fetch('http://localhost:5001/api/otp/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          identifier: email,
+          purpose: 'registration',
+          method: 'email',
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setOtpIdentifier(email);
+        setShowOTP(true);
+        setMessage(`OTP sent to ${email}`);
+      } else {
+        setMessage(data.message || "Failed to send OTP code");
+      }
+    } catch (error) {
+      console.error('Error sending OTP:', error);
+      setMessage("Failed to send OTP: " + error.message);
+    } finally {
+      setSendingOTP(false);
+    }
+  };
+
+  const handleOTPComplete = (otpCode, isVerified) => {
+    setOtpVerified(isVerified);
+    if (isVerified) {
+      setMessage("OTP verified successfully! You can now create the user.");
+    }
+  };
+
+  const resetOTPState = () => {
+    setShowOTP(false);
+    setOtpIdentifier("");
+    setOtpVerified(false);
+    setSendingOTP(false);
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setMessage("");
+    
+    // Check if OTP verification is required and completed
+    if (!otpVerified) {
+      setMessage("Please verify your OTP before creating the user.");
+      return;
+    }
+    
     try {
       const res = await api.createUser(form);
       // Backend may return multiple shapes:
@@ -81,6 +150,7 @@ export default function UsersAdmin() {
         region: "",
         phoneNumber: "",
       });
+      resetOTPState();
       setMessage("User created successfully");
       // If we appended above, we've already updated the UI. Otherwise load() was called.
     } catch (error) {
@@ -270,6 +340,7 @@ export default function UsersAdmin() {
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
                 required
+                disabled={showOTP && !otpVerified}
               />
             </div>
 
@@ -324,11 +395,43 @@ export default function UsersAdmin() {
               />
             </div>
 
-            <div className="form-actions">
-              <button type="submit" className="btn-primary">
-                Create User
-              </button>
-            </div>
+            {/* Send Verification Code Button */}
+            {!showOTP && !otpVerified && (
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => sendOTP(form.email)}
+                  disabled={sendingOTP}
+                >
+                  {sendingOTP ? 'Sending...' : 'Send Verification Code'}
+                </button>
+              </div>
+            )}
+
+            {/* OTP Verification Section */}
+            {showOTP && (
+              <div className="form-section otp-section">
+                <div className="otp-verify">
+                  <p>Enter the OTP code sent to {otpIdentifier}</p>
+                  <OTPInput
+                    length={6}
+                    onComplete={handleOTPComplete}
+                    identifier={otpIdentifier}
+                    purpose="registration"
+                    disabled={otpVerified}
+                  />
+                </div>
+              </div>
+            )}
+
+            {otpVerified && (
+              <div className="form-actions">
+                <button type="submit" className="btn-primary">
+                  Create User
+                </button>
+              </div>
+            )}
           </form>
         </div>
 

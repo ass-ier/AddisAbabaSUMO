@@ -49,4 +49,4 @@ otpSchema.index({ identifier: 1, purpose: 1, verified: 1 });
 // Clean up old OTPs periodically
 otpSchema.index({ createdAt: 1 }, { expireAfterSeconds: 600 }); // 10 minutes
 
-module.exports = mongoose.model('OTP', otpSchema);
+module.exports = mongoose.models.OTP || mongoose.model('OTP', otpSchema);

@@ -11,7 +11,7 @@ const createEmailTransporter = () => {
   // 2. Generate an app-specific password
   // 3. Set env variables: EMAIL_USER and EMAIL_PASS
   
-  return nodemailer.createTransporter({
+  return nodemailer.createTransport({
     host: process.env.EMAIL_HOST || 'smtp.gmail.com',
     port: process.env.EMAIL_PORT || 587,
     secure: false,
@@ -39,12 +39,10 @@ const generateOTP = () => {
  */
 const sendEmailOTP = async (email, otp, purpose) => {
   try {
-    // In development mode or if email not configured, just log the OTP
-    const isDevelopment = !process.env.EMAIL_USER || process.env.EMAIL_USER === 'your-email@gmail.com';
-    
-    if (isDevelopment) {
+    // Check if nodemailer is available and properly configured
+    if (!nodemailer || typeof nodemailer.createTransport !== 'function') {
       console.log('\n========================================');
-      console.log('📧 DEVELOPMENT MODE - OTP EMAIL');
+      console.log('⚠️  NODEMAILER NOT AVAILABLE - SHOWING OTP IN CONSOLE');
       console.log('========================================');
       console.log(`To: ${email}`);
       console.log(`Purpose: ${purpose}`);

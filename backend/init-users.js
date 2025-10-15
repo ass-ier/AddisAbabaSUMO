@@ -14,6 +14,8 @@ async function initializeUsers() {
       await mongoose.connect(MONGODB_URI, {});
       didConnect = true;
       console.log('Connected to MongoDB');
+    } else {
+      console.log('Using existing MongoDB connection');
     }
 
     // Helper to ensure a user exists; create if missing
@@ -76,7 +78,9 @@ async function initializeUsers() {
   } catch (error) {
     console.error('❌ Error initializing users:', error);
   } finally {
-    if (didConnect) {
+    // Only close connection if we're running directly (node init-users.js)
+    // Don't close if called from server.js
+    if (didConnect && require.main === module) {
       await mongoose.connection.close();
       console.log('Database connection closed');
     }
