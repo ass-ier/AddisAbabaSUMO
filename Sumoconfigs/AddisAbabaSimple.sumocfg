@@ -11,7 +11,7 @@
         <net-file value="AddisAbaba.net.xml" />
 
         <!-- Route definitions with realistic traffic flows -->
-        <route-files value="addisTrafficFullNetwork.rou.xml" />
+        <route-files value="addisTrafficFullNetwork_sorted.rou.xml" />
 
         <!-- Vehicle type definitions with distinctive colors and Lane Detectors -->
         <additional-files value="vehicleTypesFixed.add.xml, detectors.add.xml" />
@@ -31,7 +31,7 @@
         <!-- 0-7200 seconds = 2 hours morning peak (7:00-9:00 AM) -->
         <begin value="0" />
         <end value="7200" />
-        <step-length value="1.0" />
+        <step-length value="100.0" />
     </time>
 
     <processing>

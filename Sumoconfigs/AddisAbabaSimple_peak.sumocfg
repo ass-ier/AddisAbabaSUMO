@@ -6,7 +6,7 @@
         <net-file value="AddisAbaba.net.xml" />
 
         
-        <route-files value="addisTrafficFullNetwork_peak.rou.xml" />
+        <route-files value="addisTrafficFullNetwork_peak_sorted.rou.xml" />
 
         
         <additional-files value="vehicleTypesFixed.add.xml, detectors.add.xml" />
@@ -26,7 +26,7 @@
         
         <begin value="0" />
         <end value="7200" />
-        <step-length value="1.0" />
+        <step-length value="100.0" />
     </time>
 
     <processing>
