@@ -127,6 +127,28 @@ const TrafficLightModal = ({
     setError(null);
 
     try {
+      // Safety: enforce all-yellow for ~3 seconds before switching to the chosen phase
+      const inferLen = () => {
+        if (Array.isArray(program?.phases) && typeof currentPhaseIndex === 'number') {
+          const st = program.phases[currentPhaseIndex]?.state || '';
+          if (st.length > 0) return st.length;
+        }
+        if (Array.isArray(program?.phases) && program.phases.length > 0) {
+          const st = program.phases[0]?.state || '';
+          if (st.length > 0) return st.length;
+        }
+        if (Array.isArray(availablePhases) && availablePhases.length > 0) {
+          const st = availablePhases[0]?.state || '';
+          if (st.length > 0) return st.length;
+        }
+        return 1;
+      };
+      const len = Math.max(1, inferLen());
+      const allYellow = 'y'.repeat(len);
+      console.log('Override: applying all-yellow before phase set', { tlsId, phaseIndex, allYellowLen: len });
+      await api.tlsSetState(tlsId, allYellow);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
       const response = await api.tlsSetPhase(tlsId, phaseIndex);
       console.log("TLS phase set successfully:", response);
       setSelectedPhase(phaseIndex);
