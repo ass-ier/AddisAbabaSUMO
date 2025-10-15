@@ -578,8 +578,8 @@ const TrafficMap = () => {
     socketRef.current = io("http://localhost:5001");
     socketRef.current.emit("getStatus");
 
-    // Network geometry (lanes) arrives first with type 'net'
-    socketRef.current.on("viz", (payload) => {
+    // Network geometry and viz payloads handler
+    const handleSumoPayload = (payload) => {
       setMapData((prev) => {
         // Ensure prev is never undefined
         const prevData = prev || {
@@ -693,7 +693,12 @@ const TrafficMap = () => {
         }
         return next;
       });
-    });
+    };
+
+    // Listen to both legacy and current backend events
+    socketRef.current.on("viz", handleSumoPayload);
+    socketRef.current.on("sumoData", handleSumoPayload);
+    socketRef.current.on("sumoNet", handleSumoPayload);
 
     return () => {
       if (socketRef.current) socketRef.current.disconnect();
@@ -981,21 +986,8 @@ const TrafficMap = () => {
       iconAnchor: [9, 9],
     });
 
-  // Handle traffic light click
+  // Handle traffic light click: always open details; controls gated inside modal by role
   const handleTlsClick = (tlsId, tlsData) => {
-    if (!canOverride) {
-      try {
-        window.dispatchEvent(
-          new CustomEvent('notify', {
-            detail: {
-              type: 'error',
-              message: 'Access denied: your role cannot control traffic lights.',
-            },
-          })
-        );
-      } catch (_) {}
-      return;
-    }
     setSelectedTlsId(tlsId);
     setIsModalOpen(true);
   };
