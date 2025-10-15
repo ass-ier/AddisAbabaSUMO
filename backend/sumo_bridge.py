@@ -5,7 +5,7 @@ import json
 import time
 import argparse
 import xml.etree.ElementTree as ET
-from math import cos, sin, radians, atan2, degrees
+from math import cos, sin, radians, atan2, degrees, ceil
 import threading
 import queue
 import numpy as np
@@ -457,6 +457,33 @@ def main():
                     sys.stdout.flush()
             elif action == 'reset':
                 try:
+                    # Safety: apply all-yellow for 3 steps to clear the intersection
+                    try:
+                        cur_state = traci.trafficlight.getRedYellowGreenState(tls_id)
+                        if isinstance(cur_state, str) and len(cur_state) > 0:
+                            all_yellow = 'y' * len(cur_state)
+                        else:
+                            all_yellow = 'y'
+                        print(json.dumps({"type": "log", "level": "info", "message": f"TLS {tls_id}: applying safety all-yellow"}))
+                        sys.stdout.flush()
+                        traci.trafficlight.setRedYellowGreenState(tls_id, all_yellow)
+                        # Compute steps to approximate 3 seconds based on step length
+                        try:
+                            step_len = float(args.step_length)
+                        except Exception:
+                            step_len = 1.0
+                        steps = max(3, int(ceil(3.0 / max(0.001, step_len))))
+                        for _ in range(steps):
+                            # Re-assert yellow to be safe in case controller attempts to change
+                            traci.trafficlight.setRedYellowGreenState(tls_id, all_yellow)
+                            traci.simulationStep()
+                            try:
+                                emit_tls_update(tls_id)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
                     # Reset controller to the first available program/phase
                     defs = traci.trafficlight.getCompleteRedYellowGreenDefinition(tls_id)
                     prog_id = None

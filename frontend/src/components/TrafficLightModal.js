@@ -467,62 +467,37 @@ const TrafficLightModal = ({
                     className="control-btn"
                     onClick={async () => {
                       try {
-                        if (!canOverride) {
-                          console.warn('Resume blocked: no override permission');
-                          return;
-                        }
-                        // Determine a safe phase index to resume
-                        const phaseIdx = (typeof currentPhaseIndex === 'number')
-                          ? currentPhaseIndex
-                          : (typeof selectedPhase === 'number')
-                            ? selectedPhase
-                            : (Array.isArray(program?.phases) && program.phases.length > 0)
-                              ? (program.phases[0].index ?? 0)
-                              : 0;
-                        console.log('Resuming normal phase flow:', { tlsId, phaseIdx, currentPhaseIndex, selectedPhase });
-
-                        setLoading(true);
-                        await api.tlsResume(tlsId);
-                        setOverrideActive(false);
-                        window.dispatchEvent(
-                          new CustomEvent('notify', {
-                            detail: {
-                              type: 'success',
-                              message: 'Continuing normal phase flow',
-                            },
-                          })
-                        );
-                      } catch (err) {
-                        console.error('Resume normal flow failed:', err);
-                        window.dispatchEvent(
-                          new CustomEvent('notify', {
-                            detail: {
-                              type: 'error',
-                              message: err?.message || 'Failed to continue normal flow',
-                            },
-                          })
-                        );
-                      } finally {
-                        setLoading(false);
-                      }
-                    }}
-                    disabled={loading}
-                    style={{ padding: '8px 12px', background: '#1976D2', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
-                  >
-                    ▶ Continue normal phase flow
-                  </button>
-                  <button
-                    className="control-btn"
-                    onClick={async () => {
-                      try {
                         if (!canOverride) return;
-                        console.log('Resetting to normal program:', { tlsId });
                         setLoading(true);
+                        // Determine length of state string to build all-yellow
+                        const inferLen = () => {
+                          if (Array.isArray(program?.phases) && typeof currentPhaseIndex === 'number') {
+                            const st = program.phases[currentPhaseIndex]?.state || '';
+                            if (st.length > 0) return st.length;
+                          }
+                          if (Array.isArray(program?.phases) && program.phases.length > 0) {
+                            const st = program.phases[0]?.state || '';
+                            if (st.length > 0) return st.length;
+                          }
+                          if (Array.isArray(availablePhases) && availablePhases.length > 0) {
+                            const st = availablePhases[0]?.state || '';
+                            if (st.length > 0) return st.length;
+                          }
+                          return 1;
+                        };
+                        const len = Math.max(1, inferLen());
+                        const allYellow = 'y'.repeat(len);
+                        console.log('Applying all-yellow then reset:', { tlsId, len, allYellow });
+                        // Force all-yellow state first so it’s visible during ongoing simulation steps
+                        await api.tlsSetState(tlsId, allYellow);
+                        // Wait ~3 seconds wall time
+                        await new Promise((resolve) => setTimeout(resolve, 3000));
+                        // Now reset to normal schedule
                         await api.tlsReset(tlsId);
                         setOverrideActive(false);
                         window.dispatchEvent(
                           new CustomEvent('notify', {
-                            detail: { type: 'success', message: 'Reset to normal schedule' },
+                            detail: { type: 'success', message: 'Applied all-yellow and reset to normal schedule' },
                           })
                         );
                       } catch (err) {
