@@ -32,6 +32,9 @@ module.exports = function createSumoTlsRoutes(dependencies) {
     mapSettings
   } = dependencies;
 
+  // Latest compact vehicles snapshot for bridge health/debug
+  let latestVehiclesSnapshot = { timestamp: 0, vehicles: [] };
+
   // Helper to send commands to SUMO bridge
   function sendBridgeCommand(obj) {
     logger.info('🚦 SENDING COMMAND:', obj);
@@ -43,6 +46,45 @@ module.exports = function createSumoTlsRoutes(dependencies) {
     }
     return result;
   }
+
+  // ===== Bridge health (additive) =====
+  router.get('/bridge/health', async (req, res) => {
+    try {
+      const running = sumoSubprocess.getIsRunning();
+      const proc = sumoSubprocess.getProcessInfo();
+      res.json({
+        ok: true,
+        status: running ? 'running' : 'stopped',
+        latest: latestVehiclesSnapshot,
+        process: proc || null,
+        serverTime: Date.now(),
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // Test frame injection for smoke tests (additive, no SUMO required)
+  router.post('/bridge/test-frame', async (req, res) => {
+    try {
+      const { x = 0, y = 0, count = 8, spread = 5, speed = 2.0 } = req.body || {};
+      const pts = [];
+      for (let i = 0; i < Math.max(1, Math.min(100, Number(count) || 1)); i++) {
+        const dx = (Math.random() - 0.5) * 2 * spread;
+        const dy = (Math.random() - 0.5) * 2 * spread;
+        pts.push({ id: `test_${i}`, x: x + dx, y: y + dy, speed });
+      }
+      const vizPayload = { type: 'viz', ts: Date.now(), step: -1, vehicles: pts, tls: [] };
+      io.emit('viz', vizPayload);
+      // Also compact
+      const compact = { timestamp: vizPayload.ts, vehicles: pts.map(p => ({ id: p.id, x: p.x, y: p.y, speed: p.speed })) };
+      latestVehiclesSnapshot = compact;
+      io.emit('vehicles', compact);
+      res.json({ ok: true, sent: pts.length, center: { x, y } });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
 
   // ===== TLS ROUTES =====
   
@@ -466,6 +508,22 @@ module.exports = function createSumoTlsRoutes(dependencies) {
                 // Handle SUMO output data
                 if (payload.type === 'viz') {
                   io.emit('sumoData', payload);
+                  // Also emit compact vehicles frame for heatmap consumers (additive)
+                  try {
+                    const compact = {
+                      timestamp: payload.ts || Date.now(),
+                      vehicles: Array.isArray(payload.vehicles)
+                        ? payload.vehicles.map(v => ({
+                            id: v.id,
+                            x: typeof v.x === 'number' ? v.x : undefined,
+                            y: typeof v.y === 'number' ? v.y : undefined,
+                            speed: typeof v.speed === 'number' ? v.speed : undefined,
+                          }))
+                        : [],
+                    };
+                    latestVehiclesSnapshot = compact;
+                    io.emit('vehicles', compact);
+                  } catch (_) {}
                   
                   // Update simulation step
                   if (payload.step) {

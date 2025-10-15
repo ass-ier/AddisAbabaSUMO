@@ -9,6 +9,7 @@ import {
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
+import HeatmapOverlay from "../overlays/HeatmapOverlay";
 import "leaflet/dist/leaflet.css";
 import PageLayout from "./PageLayout";
 import "./TrafficMap.css";
@@ -287,6 +288,12 @@ const TrafficMap = () => {
     junctionPoints: [],
   });
   const [simNetLanes, setSimNetLanes] = useState([]); // lanes from running simulation (XY -> CRS.Simple)
+  // Heatmap feature flag and settings (additive)
+  const [heatEnabled, setHeatEnabled] = useState(false);
+  const [heatIntensity, setHeatIntensity] = useState(1.0);
+  const [heatHalfLife, setHeatHalfLife] = useState(2.5);
+  const [heatRadius, setHeatRadius] = useState(18);
+  const [heatDebug, setHeatDebug] = useState(false);
   const sumoMapRef = useRef(null);
 
   // Derive leaflet bounds from file bounds or from lane points if absent
@@ -647,32 +654,31 @@ const TrafficMap = () => {
 
             // Update congestion map by counting vehicles per edgeId (optimized with throttling)
             const now = Date.now();
-            if (now - lastUpdateRef.current < UPDATE_THROTTLE) {
-              return; // Skip update if too frequent
+            if (now - lastUpdateRef.current >= UPDATE_THROTTLE) {
+              lastUpdateRef.current = now;
+
+              const vehicleCount = new Map();
+
+              for (const v of vehicles) {
+                // Try multiple possible edge ID fields
+                const eid = v.edgeId || v.laneId;
+                if (!eid) continue;
+
+                // Extract edge ID from lane ID if needed (format: edgeId_laneNumber)
+                const actualEdgeId =
+                  typeof eid === "string" && eid.includes("_")
+                    ? eid.substring(0, eid.lastIndexOf("_"))
+                    : eid;
+
+                vehicleCount.set(
+                  actualEdgeId,
+                  (vehicleCount.get(actualEdgeId) || 0) + 1
+                );
+              }
+
+              // Use Map directly for better performance
+              setEdgeCongestion(vehicleCount);
             }
-            lastUpdateRef.current = now;
-
-            const vehicleCount = new Map();
-
-            for (const v of vehicles) {
-              // Try multiple possible edge ID fields
-              const eid = v.edgeId || v.laneId;
-              if (!eid) continue;
-
-              // Extract edge ID from lane ID if needed (format: edgeId_laneNumber)
-              const actualEdgeId =
-                typeof eid === "string" && eid.includes("_")
-                  ? eid.substring(0, eid.lastIndexOf("_"))
-                  : eid;
-
-              vehicleCount.set(
-                actualEdgeId,
-                (vehicleCount.get(actualEdgeId) || 0) + 1
-              );
-            }
-
-            // Use Map directly for better performance
-            setEdgeCongestion(vehicleCount);
           }
           if (payload.tls) {
             // Keep TLS state by ID regardless of coordinates; include per-side summary and timing/program if provided
@@ -1025,6 +1031,65 @@ const TrafficMap = () => {
           </select>
         </div>
 
+        {/* Heatmap controls (feature-flagged, additive) */}
+        <div className="control-group" style={{ marginLeft: 12 }}>
+          <label>
+            <input
+              type="checkbox"
+              checked={heatEnabled}
+              onChange={(e) => setHeatEnabled(e.target.checked)}
+            />
+            Heatmap
+          </label>
+        </div>
+        {heatEnabled && (
+          <>
+            <div className="control-group">
+              <label>Intensity</label>
+              <input
+                type="range"
+                min={0.2}
+                max={3}
+                step={0.1}
+                value={heatIntensity}
+                onChange={(e) => setHeatIntensity(Number(e.target.value))}
+              />
+            </div>
+            <div className="control-group">
+              <label>Decay (half-life s)</label>
+              <input
+                type="range"
+                min={0.5}
+                max={6}
+                step={0.5}
+                value={heatHalfLife}
+                onChange={(e) => setHeatHalfLife(Number(e.target.value))}
+              />
+            </div>
+            <div className="control-group">
+              <label>Radius (px)</label>
+              <input
+                type="range"
+                min={6}
+                max={48}
+                step={1}
+                value={heatRadius}
+                onChange={(e) => setHeatRadius(Number(e.target.value))}
+              />
+            </div>
+            <div className="control-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={heatDebug}
+                  onChange={(e) => setHeatDebug(e.target.checked)}
+                />
+                Debug
+              </label>
+            </div>
+          </>
+        )}
+
         {/* Network Source removed: default to SUMO Net view */}
 
         {/* Simulation Controls moved from sidebar */}
@@ -1233,6 +1298,24 @@ const TrafficMap = () => {
                 lineJoin="round"
               />
             ))}
+
+            {/* Heatmap overlay (additive, above roads) */}
+            {heatEnabled && (
+              <HeatmapOverlay
+                enabled={heatEnabled}
+                vehicles={Array.isArray(mapData?.vehicles) ? mapData.vehicles : []}
+                debug={heatDebug}
+                settings={{
+                  intensity: heatIntensity,
+                  halfLifeSec: heatHalfLife,
+                  radiusPx: heatRadius,
+                  freeFlowSpeed: 13.9,
+                  fps: 8,
+                  weighting: "speed",
+                  opacity: 0.65,
+                }}
+              />
+            )}
 
             {/* Traffic density overlay - color roads based on vehicle count */}
             {/* Default: No vehicles yet - show as light green (open roads) */}
