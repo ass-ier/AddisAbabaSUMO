@@ -128,6 +128,20 @@ const TrafficLightModal = ({
       console.log("TLS phase set successfully:", response);
       setSelectedPhase(phaseIndex);
 
+      // Additionally force the exact R/Y/G state for the selected phase (if we know it)
+      // This avoids timing/program quirks and ensures the GUI reflects the change immediately
+      const programPhases = program?.phases || [];
+      const desiredState = programPhases.find((p) => p.index === phaseIndex)?.state
+        || availablePhases.find((p) => p.index === phaseIndex)?.state;
+      if (desiredState && typeof desiredState === 'string' && desiredState.length > 0) {
+        try {
+          await api.tlsSetState(tlsId, desiredState);
+          console.log("TLS state forced successfully to:", desiredState);
+        } catch (forceErr) {
+          console.warn("TLS set-state fallback failed:", forceErr?.message || forceErr);
+        }
+      }
+
       // Show success notification
       window.dispatchEvent(
         new CustomEvent("notify", {

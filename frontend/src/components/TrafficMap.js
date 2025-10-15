@@ -680,6 +680,7 @@ const TrafficMap = () => {
               .filter((t) => t && typeof t.id === "string")
               .map((t) => ({
                 id: t.id,
+                junctionId: t.junction_id || t.junctionId, // prefer junction id from live payload when available
                 state: t.state,
                 sides: t.sides,
                 turns: t.turns,
@@ -1638,7 +1639,7 @@ const TrafficMap = () => {
       {/* Traffic Light Control Modal */}
       {selectedTlsId && (
         <TrafficLightModal
-          tlsId={selectedTlsId}
+          tlsId={getSelectedTlsData()?.junctionId || selectedTlsId}
           isOpen={isModalOpen}
           onClose={handleModalClose}
           timing={getSelectedTlsData()?.timing}
