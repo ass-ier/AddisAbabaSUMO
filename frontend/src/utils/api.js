@@ -38,7 +38,18 @@ async function fetchJson(url, options = {}) {
 }
 
 // Base API URL (can be overridden with REACT_APP_API_BASE)
-const BASE_API = process.env.REACT_APP_API_BASE || "http://localhost:5001";
+export const BASE_API = process.env.REACT_APP_API_BASE || "http://localhost:5001";
+
+export function toQuery(params = {}) {
+  const qp = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null) return;
+    const s = String(v);
+    if (s.trim() === "" || s === "undefined" || s === "null") return;
+    qp.append(k, s);
+  });
+  return qp.toString();
+}
 
 export const api = {
   // Users
@@ -111,6 +122,20 @@ export const api = {
       headers: jsonHeaders(),
       body: JSON.stringify({ withConfig }),
     }),
+
+  // Traffic data (historical/aggregates)
+  getTrafficData: async (params = {}) => {
+    const qs = toQuery(params);
+    return fetchJson(`${BASE_API}/api/traffic-data${qs ? `?${qs}` : ""}`, {
+      headers: authHeaders(),
+    });
+  },
+  getTrafficAggregates: async (params = {}) => {
+    const qs = toQuery(params);
+    return fetchJson(`${BASE_API}/api/traffic/aggregates${qs ? `?${qs}` : ""}`, {
+      headers: authHeaders(),
+    });
+  },
 
   // Stats
   getStatsOverview: async () =>

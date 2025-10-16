@@ -1,91 +1,216 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import axios from "axios";
 import io from "socket.io-client";
 import "./TrafficMonitoring.css";
 import PageLayout from "./PageLayout";
+import { api, BASE_API } from "../utils/api";
+import LiveIntersectionMap from "./LiveIntersectionMap";
 
 const TrafficMonitoring = () => {
-  const [trafficData, setTrafficData] = useState([]);
+  const [trafficData, setTrafficData] = useState([]); // raw or aggregated depending on mode
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
     intersectionId: "",
     startDate: "",
     endDate: "",
   });
-  const [live, setLive] = useState(false);
+  const [intervalMinutes] = useState(30);
+  const [liveRequested, setLiveRequested] = useState(false);
+  const [simRunning, setSimRunning] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
+  const [liveStats, setLiveStats] = useState({ visibleVehicles: 0, avgSpeedMs: 0 });
   const socketRef = useRef(null);
   const statusPollRef = useRef(null);
+  const liveBucketsRef = useRef(new Map());
+
+  const bucketStart = (ts) => {
+    const d = typeof ts === "number" ? new Date(ts) : new Date(ts);
+    const msec = d.getTime();
+    const size = intervalMinutes * 60 * 1000;
+    const start = Math.floor(msec / size) * size;
+    return new Date(start);
+  };
+
+  const normalizeFlows = (flows = {}, direction, count = 0) => {
+    const keys = ["n","s","e","w","north","south","east","west","N","S","E","W"];
+    const out = { N: 0, S: 0, E: 0, W: 0 };
+    // If flows object present, map to N/S/E/W
+    if (flows && typeof flows === "object") {
+      keys.forEach((k) => {
+        if (flows[k] != null) {
+          const val = Number(flows[k]) || 0;
+          const kk = k[0].toUpperCase();
+          if (out[kk] != null) out[kk] += val;
+        }
+      });
+    }
+    // If single direction/count provided
+    if (direction) {
+      const kk = (direction[0] || "").toUpperCase();
+      if (out[kk] != null) out[kk] += Number(count) || 0;
+    }
+    return out;
+  };
+
+  const aggregateByInterval = (records = []) => {
+    const groups = new Map();
+    records.forEach((r) => {
+      const ts = r.timestamp || r.time || Date.now();
+      const b = bucketStart(ts);
+      const key = `${r.intersectionId || r.tls_id || r.id || "unknown"}|${b.toISOString()}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          bucketStart: b.toISOString(),
+          bucketEnd: new Date(b.getTime() + intervalMinutes * 60 * 1000).toISOString(),
+          intersectionId: r.intersectionId || r.tls_id || r.id || "unknown",
+          vehicleCount: 0,
+          waitingTimeTotal: 0,
+          waitingTimeSamples: 0,
+          throughput: 0,
+          flows: { N: 0, S: 0, E: 0, W: 0 },
+        });
+      }
+      const g = groups.get(key);
+      const vc = Number(r.vehicleCount ?? r.count ?? 0) || 0;
+      g.vehicleCount += vc;
+      g.throughput += vc; // vehicles per bucket; can compute per-hour if needed in UI
+      if (r.waitingTime != null) {
+        g.waitingTimeTotal += Number(r.waitingTime) || 0;
+        g.waitingTimeSamples += 1;
+      }
+      // Merge flows
+      const merged = normalizeFlows(r.flows, r.direction, vc);
+      g.flows.N += merged.N;
+      g.flows.S += merged.S;
+      g.flows.E += merged.E;
+      g.flows.W += merged.W;
+    });
+    // finalize
+    return Array.from(groups.values()).map((g) => ({
+      ...g,
+      avgWaitingTime: g.waitingTimeSamples ? g.waitingTimeTotal / g.waitingTimeSamples : 0,
+    })).sort((a, b) => new Date(b.bucketStart) - new Date(a.bucketStart));
+  };
 
   const fetchTrafficData = useCallback(async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-
-      if (filters.intersectionId) {
-        params.append("intersectionId", filters.intersectionId);
-      }
-      if (filters.startDate) {
-        params.append("startDate", filters.startDate);
-      }
-      if (filters.endDate) {
-        params.append("endDate", filters.endDate);
-      }
-
-      const response = await axios.get(`/api/traffic-data?${params}`);
-      setTrafficData(response.data);
+      const params = {
+        intersectionId: filters.intersectionId || undefined,
+        startDate: filters.startDate || undefined,
+        endDate: filters.endDate || undefined,
+        intervalMinutes,
+      };
+      // Fetch raw records; aggregate client-side for 30-minute buckets
+      const data = await api.getTrafficData(params);
+      const processed = Array.isArray(data) ? data : data?.items || [];
+      const finalData = aggregateByInterval(processed);
+      setTrafficData(finalData);
+      setStatusMsg("");
     } catch (error) {
       console.error("Error fetching traffic data:", error);
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, intervalMinutes]);
 
   useEffect(() => {
-    fetchTrafficData();
-  }, [filters, fetchTrafficData]);
+    if (!liveRequested) {
+      fetchTrafficData();
+    }
+  }, [filters, fetchTrafficData, liveRequested]);
 
-  // Auto-detect simulation status to drive live mode; if not running, show latest stored data
+  // Monitor SUMO status only when live is requested
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        const res = await axios.get("/api/sumo/status");
-        const running = !!res.data?.isRunning;
-        setLive((prev) => (prev !== running ? running : prev));
-        if (!running) {
-          // Ensure we have up-to-date stored data when not live
-          fetchTrafficData();
+        const res = await api.getSumoStatus();
+        const running = !!res?.isRunning;
+        setSimRunning(running);
+        if (!running && liveRequested) {
+          setStatusMsg("No simulation running currently");
+          // Also ensure some data is shown: load latest stored aggregates if filters set
+          if (filters.startDate || filters.endDate || filters.intersectionId) {
+            fetchTrafficData();
+          }
+        } else {
+          setStatusMsg("");
         }
       } catch (e) {
-        // If status check fails, fall back to non-live and load stored data
-        setLive(false);
-        fetchTrafficData();
+        setSimRunning(false);
+        if (liveRequested) {
+          setStatusMsg("No simulation running currently");
+        }
       }
     };
 
-    // Initial check
-    checkStatus();
-    // Poll every 15s to react to status changes without altering layout
-    statusPollRef.current = setInterval(checkStatus, 15000);
-
-    return () => {
-      if (statusPollRef.current) {
-        clearInterval(statusPollRef.current);
-        statusPollRef.current = null;
-      }
-    };
-  }, [fetchTrafficData]);
+    if (liveRequested) {
+      checkStatus();
+      statusPollRef.current = setInterval(checkStatus, 15000);
+      return () => {
+        if (statusPollRef.current) {
+          clearInterval(statusPollRef.current);
+          statusPollRef.current = null;
+        }
+      };
+    }
+    // if not live, ensure status cleared and any socket disconnected happens in other effect
+    setStatusMsg("");
+    return undefined;
+  }, [liveRequested, fetchTrafficData, filters]);
 
   useEffect(() => {
-    if (!live) {
+    if (!liveRequested || !simRunning) {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
+      // reset live buckets when leaving live mode
+      liveBucketsRef.current = new Map();
       return;
     }
-    socketRef.current = io("http://localhost:5001", { transports: ["websocket"] });
+    // Connect to simulation stream
+    socketRef.current = io(BASE_API, { transports: ["websocket"] });
     socketRef.current.on("trafficData", (data) => {
-      setTrafficData((prev) => [data, ...prev].slice(0, 500));
+      // Optional filter by intersection
+      if (filters.intersectionId && data.intersectionId && data.intersectionId !== filters.intersectionId) {
+        return;
+      }
+      // Bucketize
+      const ts = data.timestamp || Date.now();
+      const b = bucketStart(ts);
+      const key = `${data.intersectionId || data.tls_id || "unknown"}|${b.toISOString()}`;
+      const existing = liveBucketsRef.current.get(key) || {
+        bucketStart: b.toISOString(),
+        bucketEnd: new Date(b.getTime() + intervalMinutes * 60 * 1000).toISOString(),
+        intersectionId: data.intersectionId || data.tls_id || "unknown",
+        vehicleCount: 0,
+        throughput: 0,
+        waitingTimeTotal: 0,
+        waitingTimeSamples: 0,
+        flows: { N: 0, S: 0, E: 0, W: 0 },
+      };
+      const vc = Number(data.vehicleCount ?? data.count ?? 0) || 0;
+      const merged = normalizeFlows(data.flows, data.direction, vc);
+      const next = {
+        ...existing,
+        vehicleCount: existing.vehicleCount + vc,
+        throughput: existing.throughput + vc,
+        waitingTimeTotal: existing.waitingTimeTotal + (Number(data.waitingTime) || 0),
+        waitingTimeSamples: existing.waitingTimeSamples + (data.waitingTime != null ? 1 : 0),
+        flows: {
+          N: existing.flows.N + merged.N,
+          S: existing.flows.S + merged.S,
+          E: existing.flows.E + merged.E,
+          W: existing.flows.W + merged.W,
+        },
+      };
+      liveBucketsRef.current.set(key, next);
+      // Project to array for display
+      const arr = Array.from(liveBucketsRef.current.values()).map((g) => ({
+        ...g,
+        avgWaitingTime: g.waitingTimeSamples ? g.waitingTimeTotal / g.waitingTimeSamples : 0,
+      })).sort((a, b) => new Date(b.bucketStart) - new Date(a.bucketStart));
+      setTrafficData(arr);
     });
     return () => {
       if (socketRef.current) {
@@ -93,7 +218,7 @@ const TrafficMonitoring = () => {
         socketRef.current = null;
       }
     };
-  }, [live]);
+  }, [liveRequested, simRunning, intervalMinutes, filters.intersectionId]);
 
   const handleFilterChange = (e) => {
     setFilters({
@@ -104,7 +229,7 @@ const TrafficMonitoring = () => {
 
   const handleFilterSubmit = (e) => {
     e.preventDefault();
-    fetchTrafficData();
+    if (!liveRequested) fetchTrafficData();
   };
 
   const clearFilters = () => {
@@ -119,20 +244,28 @@ const TrafficMonitoring = () => {
   const exportCsv = () => {
     if (!trafficData?.length) return;
     const headers = [
-      "timestamp",
+      "bucketStart",
+      "bucketEnd",
       "intersectionId",
-      "trafficFlow",
-      "vehicleCount",
-      "averageSpeed",
-      "signalStatus",
+      "vehicles",
+      "throughput",
+      "avgWaitingTime",
+      "flowsN",
+      "flowsS",
+      "flowsE",
+      "flowsW",
     ];
     const rows = trafficData.map((d) => [
-      d.timestamp ? new Date(d.timestamp).toISOString() : "",
+      d.bucketStart,
+      d.bucketEnd,
       d.intersectionId ?? "",
-      d.trafficFlow ?? "",
-      d.vehicleCount ?? "",
-      d.averageSpeed ?? "",
-      d.signalStatus ?? "",
+      d.vehicleCount ?? 0,
+      d.throughput ?? d.vehicleCount ?? 0,
+      Math.round((d.avgWaitingTime ?? 0) * 10) / 10,
+      d.flows?.N ?? 0,
+      d.flows?.S ?? 0,
+      d.flows?.E ?? 0,
+      d.flows?.W ?? 0,
     ]);
     const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -156,6 +289,7 @@ const TrafficMonitoring = () => {
     URL.revokeObjectURL(url);
   };
 
+  // Deprecated color helper retained if future status badges needed
   const getSignalStatusColor = (status) => {
     switch ((status || "").toLowerCase()) {
       case "green":
@@ -224,8 +358,8 @@ const TrafficMonitoring = () => {
             <label className="live-toggle">
               <input
                 type="checkbox"
-                checked={live}
-                onChange={(e) => setLive(e.target.checked)}
+                checked={liveRequested}
+                onChange={(e) => setLiveRequested(e.target.checked)}
               />
               Live
             </label>
@@ -233,11 +367,34 @@ const TrafficMonitoring = () => {
         </form>
       </div>
 
+      {liveRequested && (
+        <div className="traffic-data-section" style={{ marginTop: 16 }}>
+          <div className="section-header">
+            <h2>Live Intersection View</h2>
+          </div>
+          {simRunning ? (
+            filters.intersectionId ? (
+              <LiveIntersectionMap
+                intersectionId={filters.intersectionId}
+                paddingMeters={150}
+                onStats={(s) => setLiveStats(s)}
+              />
+            ) : (
+              <div className="no-data">
+                <p>Enter an Intersection ID to focus the live map.</p>
+              </div>
+            )
+          ) : (
+            statusMsg && <div className="no-data"><p>{statusMsg}</p></div>
+          )}
+        </div>
+      )}
+
       <div className="traffic-data-section">
         <div className="section-header">
-          <h2>Traffic Data</h2>
+          <h2>Traffic Data (30-minute intervals)</h2>
           <div className="section-actions">
-            <button onClick={fetchTrafficData} className="btn-secondary">
+            <button onClick={fetchTrafficData} className="btn-secondary" disabled={liveRequested}>
               Refresh Data
             </button>
             <button onClick={exportCsv} className="btn-secondary">
@@ -249,6 +406,10 @@ const TrafficMonitoring = () => {
           </div>
         </div>
 
+        {liveRequested && !simRunning && statusMsg && (
+          <div className="no-data"><p>{statusMsg}</p></div>
+        )}
+
         {loading ? (
           <div className="loading">Loading traffic data...</div>
         ) : (
@@ -257,45 +418,34 @@ const TrafficMonitoring = () => {
               <table>
                 <thead>
                   <tr>
-                    <th>Timestamp</th>
+                    <th>Time Window</th>
                     <th>Intersection ID</th>
-                    <th>Traffic Flow</th>
-                    <th>Vehicle Count</th>
-                    <th>Average Speed</th>
-                    <th>Signal Status</th>
+                    <th>Flows (N/E/S/W)</th>
+                    <th>Vehicles</th>
+                    <th>Throughput</th>
+                    <th>Avg Waiting (s)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {trafficData.map((data, index) => (
                     <tr key={index}>
                       <td>
-                        {data.timestamp
-                          ? new Date(data.timestamp).toLocaleString()
+                        {data.bucketStart && data.bucketEnd
+                          ? `${new Date(data.bucketStart).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - ${new Date(data.bucketEnd).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`
                           : ""}
                       </td>
                       <td>{data.intersectionId}</td>
-                      <td>{data.trafficFlow}</td>
+                      <td>{`${data.flows?.N ?? 0}/${data.flows?.E ?? 0}/${data.flows?.S ?? 0}/${data.flows?.W ?? 0}`}</td>
                       <td>{data.vehicleCount || 0}</td>
-                      <td>{data.averageSpeed || 0} km/h</td>
-                      <td>
-                        <span
-                          className="signal-status"
-                          style={{
-                            backgroundColor: getSignalStatusColor(
-                              data.signalStatus
-                            ),
-                          }}
-                        >
-                          {data.signalStatus}
-                        </span>
-                      </td>
+                      <td>{data.throughput ?? data.vehicleCount ?? 0}</td>
+                      <td>{Math.round((data.avgWaitingTime || 0) * 10) / 10}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : (
               <div className="no-data">
-                <p>No traffic data found for the selected filters.</p>
+                <p>No traffic data found for the selected inputs.</p>
               </div>
             )}
           </div>
@@ -305,46 +455,74 @@ const TrafficMonitoring = () => {
       <div className="traffic-summary">
         <h2>Traffic Summary</h2>
         <div className="summary-cards">
-          <div className="summary-card">
-            <h3>Total Records</h3>
-            <p>{trafficData.length}</p>
-          </div>
-
-          <div className="summary-card">
-            <h3>Average Vehicle Count</h3>
-            <p>
-              {trafficData.length > 0
-                ? Math.round(
-                    trafficData.reduce(
-                      (sum, data) => sum + (data.vehicleCount || 0),
-                      0
-                    ) / trafficData.length
-                  )
-                : 0}
-            </p>
-          </div>
-
-          <div className="summary-card">
-            <h3>Average Speed</h3>
-            <p>
-              {trafficData.length > 0
-                ? Math.round(
-                    trafficData.reduce(
-                      (sum, data) => sum + (data.averageSpeed || 0),
-                      0
-                    ) / trafficData.length
-                  )
-                : 0}{" "}
-              km/h
-            </p>
-          </div>
-
-          <div className="summary-card">
-            <h3>Unique Intersections</h3>
-            <p>
-              {new Set(trafficData.map((data) => data.intersectionId)).size}
-            </p>
-          </div>
+          {liveRequested ? (
+            <>
+              <div className="summary-card">
+                <h3>Visible Vehicles</h3>
+                <p>{liveStats.visibleVehicles || 0}</p>
+              </div>
+              <div className="summary-card">
+                <h3>Avg Speed (km/h)</h3>
+                <p>{Math.round(((liveStats.avgSpeedMs || 0) * 3.6) * 10) / 10}</p>
+              </div>
+              <div className="summary-card">
+                <h3>Total Buckets (30m)</h3>
+                <p>{trafficData.length}</p>
+              </div>
+              <div className="summary-card">
+                <h3>Avg Waiting (s)</h3>
+                <p>
+                  {trafficData.length > 0
+                    ? Math.round(
+                        (trafficData.reduce(
+                          (sum, d) => sum + (d.avgWaitingTime || 0),
+                          0
+                        ) / trafficData.length) * 10
+                      ) / 10
+                    : 0}
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="summary-card">
+                <h3>Total Buckets</h3>
+                <p>{trafficData.length}</p>
+              </div>
+              <div className="summary-card">
+                <h3>Avg Vehicles / 30m</h3>
+                <p>
+                  {trafficData.length > 0
+                    ? Math.round(
+                        trafficData.reduce(
+                          (sum, d) => sum + (d.vehicleCount || 0),
+                          0
+                        ) / trafficData.length
+                      )
+                    : 0}
+                </p>
+              </div>
+              <div className="summary-card">
+                <h3>Avg Waiting (s)</h3>
+                <p>
+                  {trafficData.length > 0
+                    ? Math.round(
+                        (trafficData.reduce(
+                          (sum, d) => sum + (d.avgWaitingTime || 0),
+                          0
+                        ) / trafficData.length) * 10
+                      ) / 10
+                    : 0}
+                </p>
+              </div>
+              <div className="summary-card">
+                <h3>Unique Intersections</h3>
+                <p>
+                  {new Set(trafficData.map((d) => d.intersectionId)).size}
+                </p>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </PageLayout>
