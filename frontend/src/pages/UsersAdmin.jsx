@@ -152,6 +152,12 @@ export default function UsersAdmin() {
       });
       resetOTPState();
       setMessage("User created successfully");
+      
+      // Auto-dismiss success message after 5 seconds
+      setTimeout(() => {
+        setMessage("");
+      }, 5000);
+      
       // If we appended above, we've already updated the UI. Otherwise load() was called.
     } catch (error) {
       console.error("Error creating user:", error);
