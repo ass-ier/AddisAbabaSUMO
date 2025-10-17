@@ -225,6 +225,20 @@ export const api = {
       method: "POST",
       headers: authHeaders(),
     }),
+
+  // OTP
+  sendOTP: async (identifier, purpose = "registration", otpMethod = "email") =>
+    fetchJson(`${BASE_API}/api/otp/send`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ identifier, purpose, method: otpMethod }),
+    }),
+  verifyOTP: async (identifier, otp, purpose = "registration") =>
+    fetchJson(`${BASE_API}/api/otp/verify`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ identifier, otp, purpose }),
+    }),
 };
 
 function authHeaders() {

@@ -312,6 +312,9 @@ const Login = () => {
               <p onClick={() => handleDemoLogin("analystnew", "analyst123")} style={{ cursor: "pointer" }}>
                 Analyst: analystnew / analyst123
               </p>
+              <p onClick={() => handleDemoLogin("testuser", "test123")} style={{ cursor: "pointer" }}>
+                Test User: testuser / test123
+              </p>
             </div>
           </form>
         )}

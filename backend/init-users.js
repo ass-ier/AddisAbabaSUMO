@@ -74,6 +74,16 @@ async function initializeUsers() {
       role: 'analyst',
     });
 
+    await ensureUser({
+      username: 'testuser',
+      password: 'test123',
+      email: 'assieranteneh0306@gmail.com',
+      firstName: 'Test',
+      lastName: 'User',
+      role: 'operator',
+      region: 'Addis Ababa',
+    });
+
     console.log('✅ User initialization complete.');
   } catch (error) {
     console.error('❌ Error initializing users:', error);
