@@ -9,6 +9,10 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config({ path: './config.env' });
 
+// Swagger / OpenAPI
+const swaggerUi = require('swagger-ui-express');
+const openapiSpec = require('./src/docs/openapi');
+
 // Import new three-tier architecture modules
 const logger = require('./src/utils/logger');
 const { errorHandler, notFound } = require('./src/middleware/errorHandler');
@@ -107,6 +111,10 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
+
+// ===== Swagger Docs =====
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec, { explorer: true }));
+app.get('/api/openapi.json', (req, res) => res.json(openapiSpec));
 
 // ===== Redis Connection =====
 const redisClient = new Redis({
