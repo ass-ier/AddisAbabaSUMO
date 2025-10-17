@@ -264,7 +264,7 @@ const TrafficMap = () => {
     tls: [],
   });
   const [loading, setLoading] = useState(true);
-  const [mapView, setMapView] = useState("traffic"); // traffic, emergency, maintenance
+  const [mapView, setMapView] = useState("all"); // all, tls, heat
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(5000); // 5 seconds
   const socketRef = useRef(null);
@@ -295,6 +295,9 @@ const TrafficMap = () => {
   const [heatRadius, setHeatRadius] = useState(18);
   const [heatDebug, setHeatDebug] = useState(false);
   const sumoMapRef = useRef(null);
+
+  // Derived view toggles
+  const heatVisible = mapView === "all" || mapView === "heat";
 
   // Derive leaflet bounds from file bounds or from lane points if absent
   const sumoBounds = useMemo(() => {
@@ -1025,24 +1028,14 @@ const TrafficMap = () => {
             onChange={(e) => setMapView(e.target.value)}
             className="control-select"
           >
-            <option value="traffic">All Traffic</option>
-            <option value="emergency">Emergency Only</option>
-            <option value="maintenance">Maintenance</option>
+            <option value="all">All (Traffic lights and Heatmap)</option>
+            <option value="tls">Traffic Lights</option>
+            <option value="heat">Heatmap</option>
           </select>
         </div>
 
-        {/* Heatmap controls (feature-flagged, additive) */}
-        <div className="control-group" style={{ marginLeft: 12 }}>
-          <label>
-            <input
-              type="checkbox"
-              checked={heatEnabled}
-              onChange={(e) => setHeatEnabled(e.target.checked)}
-            />
-            Heatmap
-          </label>
-        </div>
-        {heatEnabled && (
+        {/* Heatmap settings: show when Heatmap is visible (All or Heatmap) */}
+        {heatVisible && (
           <>
             <div className="control-group">
               <label>Intensity</label>
@@ -1269,9 +1262,9 @@ const TrafficMap = () => {
             ))}
 
             {/* Heatmap overlay (additive, above roads) */}
-            {heatEnabled && (
+            {heatVisible && (
               <HeatmapOverlay
-                enabled={heatEnabled}
+                enabled={true}
                 vehicles={Array.isArray(mapData?.vehicles) ? mapData.vehicles : []}
                 debug={heatDebug}
                 settings={{
@@ -1333,7 +1326,7 @@ const TrafficMap = () => {
             )}
 
             {/* TLS from .net.xml positions with live phase state from simulation */}
-            {mapView === "traffic" &&
+            {mapView !== "heat" &&
               Array.isArray(sumoNetData.tls) &&
               (() => {
                 const liveMap = new Map(
