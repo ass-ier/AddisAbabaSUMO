@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import axios from "axios";
+import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
+import { api, BASE_API as API_BASE } from "../utils/api";
 import {
   LineChart,
   Line,
@@ -12,8 +12,6 @@ import {
   BarChart,
   Bar,
 } from "recharts";
-
-const API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:5001";
 
 export default function ReportsAdmin() {
   // Date range (default last 24 hours)
@@ -30,48 +28,77 @@ export default function ReportsAdmin() {
       .slice(0, 16);
   });
 
-  const [traffic, setTraffic] = useState([]);
+  const [kpis, setKpis] = useState({ uptime: 0, congestionReduction: 0, avgResponse: 0, avgSpeed: 0 });
+  const [trend, setTrend] = useState([]);
   const [loading, setLoading] = useState(false);
   const socketRef = useRef(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [liveMode, setLiveMode] = useState(false); // when true, include realtime data
+  const [liveMode, setLiveMode] = useState(false); // when true, periodically refresh from APIs
   const [locked, setLocked] = useState(false); // when true, freeze current dataset for consistent report
 
-  const fetchTraffic = async () => {
+  const fetchReportsData = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      if (start) params.append("startDate", new Date(start).toISOString());
-      if (end) params.append("endDate", new Date(end).toISOString());
-      // pull up to 1000 samples; backend supports limit
-      params.append("limit", "1000");
-      const res = await axios.get(`${API_BASE}/api/traffic-data?${params}`);
-      const data = Array.isArray(res.data) ? res.data : [];
-      setTraffic(data);
-    } catch (e) {
+      const startIso = start ? new Date(start).toISOString() : undefined;
+      const endIso = end ? new Date(end).toISOString() : undefined;
+      const [k, t] = await Promise.all([
+        api.getKpis({ startDate: startIso, endDate: endIso }),
+        api.getTrends({ startDate: startIso, endDate: endIso }),
+      ]);
+      setKpis(k || { uptime: 0, congestionReduction: 0, avgResponse: 0, avgSpeed: 0 });
+      setTrend(Array.isArray(t?.daily) ? t.daily : []);
+    } catch (_) {
       // soft-fail
     } finally {
       setLoading(false);
     }
   };
 
+  // Snapshot/export helpers
+  const buildSnapshot = () => ({
+    generatedAt: new Date().toISOString(),
+    range: {
+      start: start ? new Date(start).toISOString() : null,
+      end: end ? new Date(end).toISOString() : null,
+    },
+    locked,
+    isRunning,
+    kpis,
+    trend,
+  });
+
+  const download = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportJson = () => {
+    const data = buildSnapshot();
+    download(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+      `report_${Date.now()}.json`);
+  };
+
+  const exportCsv = () => {
+    const headers = ["day", "avgSpeed", "emergencies"];
+    const lines = [headers.join(",")];
+    (trend || []).forEach((r) => {
+      const row = [r.day ?? "", r.avgSpeed ?? "", r.emergencies ?? ""];
+      lines.push(row.join(","));
+    });
+    const csv = lines.join("\n");
+    download(new Blob([csv], { type: "text/csv" }), `trend_${Date.now()}.csv`);
+  };
+
   useEffect(() => {
-    fetchTraffic();
-    // Socket for realtime updates
+    // initial fetch
+    fetchReportsData();
+    // Socket for realtime SUMO status (optional)
     socketRef.current = io(API_BASE, { transports: ["websocket"] });
     socketRef.current.on("sumoStatus", (s) => setIsRunning(!!s?.isRunning));
-    socketRef.current.on("trafficData", (payload) => {
-      // Append only if live mode is on and report is not locked
-      if (!liveMode || locked) return;
-      try {
-        const t = new Date(payload.timestamp || Date.now()).toISOString();
-        const startIso = start ? new Date(start).toISOString() : null;
-        const endIso = end ? new Date(end).toISOString() : null;
-        if ((!startIso || t >= startIso) && (!endIso || t <= endIso)) {
-          setTraffic((prev) => [payload, ...prev].slice(0, 1000));
-        }
-      } catch (_) {}
-    });
     return () => {
       try {
         socketRef.current?.disconnect();
@@ -80,40 +107,15 @@ export default function ReportsAdmin() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const kpi = useMemo(() => {
-    if (!traffic.length) return { uptime: 0, congestionReduction: 0, avgResponse: 0, avgSpeed: 0 };
-    const avgSpeed = Number(
-      (
-        traffic.reduce((acc, d) => acc + (Number(d.averageSpeed) || 0), 0) /
-        traffic.length
-      ).toFixed(1)
-    );
-    // Heuristic values for demo: base on trafficFlow
-    const avgFlow = traffic.reduce((a, d) => a + (Number(d.trafficFlow) || 0), 0) / traffic.length;
-    const maxFlow = 2000; // assumed peak
-    const congestionReduction = Math.max(0, Math.min(100, Number(((1 - avgFlow / maxFlow) * 100).toFixed(1))));
-    const uptime = traffic.length > 0 ? 100 : 0; // data present within window => 100%
-    const avgResponse = 24; // keep UI stable; can wire from emergencies later
-    return { uptime, congestionReduction, avgResponse, avgSpeed };
-  }, [traffic]);
-
-  const trend = useMemo(() => {
-    const byDay = {};
-    for (const d of traffic) {
-      const day = new Date(d.timestamp || Date.now()).toISOString().slice(0, 10);
-      const spd = Number(d.averageSpeed) || 0;
-      const flow = Number(d.trafficFlow) || 0;
-      if (!byDay[day]) byDay[day] = { day, _sum: 0, _cnt: 0, emergencies: 0 };
-      byDay[day]._sum += spd;
-      byDay[day]._cnt += 1;
-      if (flow > 1000) byDay[day].emergencies += 1;
-    }
-    return Object.values(byDay).map((x) => ({
-      day: x.day,
-      avgSpeed: x._cnt ? Number((x._sum / x._cnt).toFixed(1)) : 0,
-      emergencies: x.emergencies,
-    }));
-  }, [traffic]);
+  // Live mode polling
+  useEffect(() => {
+    if (!liveMode || locked) return;
+    const id = setInterval(() => {
+      fetchReportsData();
+    }, 10000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMode, locked, start, end]);
 
   return (
     <div className="p-6">
@@ -143,7 +145,7 @@ export default function ReportsAdmin() {
           />
         </div>
         <div className="flex items-end gap-2">
-          <button className="btn-secondary" onClick={() => { setLocked(false); fetchTraffic(); }} disabled={loading}>
+          <button className="btn-secondary" onClick={() => { setLocked(false); fetchReportsData(); }} disabled={loading}>
             {loading ? "Loading..." : "Apply"}
           </button>
           <button
@@ -154,7 +156,7 @@ export default function ReportsAdmin() {
               setStart(new Date(s.getTime() - s.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
               setEnd(new Date(e.getTime() - e.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
               setLocked(false);
-              fetchTraffic();
+              fetchReportsData();
             }}
           >
             Last 24h
@@ -170,13 +172,19 @@ export default function ReportsAdmin() {
             Live updates (include realtime data)
           </label>
         </div>
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 flex-wrap">
           <button
             className="btn-secondary"
             onClick={() => { setLocked(true); }}
             title="Freeze the current dataset so repeated generations are identical"
           >
             Generate Report (Snapshot)
+          </button>
+          <button className="btn-secondary" onClick={exportJson} title="Download current dataset as JSON">
+            Export JSON
+          </button>
+          <button className="btn-secondary" onClick={exportCsv} title="Download trend series as CSV">
+            Export CSV
           </button>
         </div>
       </div>
@@ -185,19 +193,19 @@ export default function ReportsAdmin() {
       <div className="grid md:grid-cols-4 gap-4 mb-4">
         <div className="bg-white p-4 rounded shadow shadow-card">
           <div className="text-sm text-gray-500">Uptime</div>
-          <div className="text-2xl font-bold">{kpi.uptime}%</div>
+          <div className="text-2xl font-bold">{kpis.uptime}%</div>
         </div>
         <div className="bg-white p-4 rounded shadow shadow-card">
           <div className="text-sm text-gray-500">Congestion Reduction</div>
-          <div className="text-2xl font-bold">{kpi.congestionReduction}%</div>
+          <div className="text-2xl font-bold">{kpis.congestionReduction}%</div>
         </div>
         <div className="bg-white p-4 rounded shadow shadow-card">
           <div className="text-sm text-gray-500">Avg Response</div>
-          <div className="text-2xl font-bold">{kpi.avgResponse}s</div>
+          <div className="text-2xl font-bold">{kpis.avgResponse}s</div>
         </div>
         <div className="bg-white p-4 rounded shadow shadow-card">
           <div className="text-sm text-gray-500">Average Speed</div>
-          <div className="text-2xl font-bold">{kpi.avgSpeed} km/h</div>
+          <div className="text-2xl font-bold">{kpis.avgSpeed} km/h</div>
         </div>
       </div>
 
@@ -229,6 +237,36 @@ export default function ReportsAdmin() {
               <Bar dataKey="emergencies" fill="#22c55e" />
             </BarChart>
           </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Raw series table */}
+      <div className="bg-white p-4 rounded shadow shadow-card">
+        <h2 className="font-medium mb-3">Series</h2>
+        <div className="overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2 pr-4">Day</th>
+                <th className="py-2 pr-4">Avg Speed</th>
+                <th className="py-2 pr-4">Emergencies</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(trend || []).map((r, i) => (
+                <tr key={i} className="border-b last:border-none">
+                  <td className="py-2 pr-4">{r.day ?? ""}</td>
+                  <td className="py-2 pr-4">{r.avgSpeed ?? ""}</td>
+                  <td className="py-2 pr-4">{r.emergencies ?? ""}</td>
+                </tr>
+              ))}
+              {(!trend || trend.length === 0) && (
+                <tr>
+                  <td className="py-2 pr-4" colSpan={3}>No data</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

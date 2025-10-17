@@ -102,10 +102,14 @@ export const api = {
   },
 
   // Reports
-  getKpis: async () =>
-    fetchJson(`${BASE_API}/api/reports/kpis`, { headers: authHeaders() }),
-  getTrends: async () =>
-    fetchJson(`${BASE_API}/api/reports/trends`, { headers: authHeaders() }),
+  getKpis: async (params = {}) => {
+    const qs = toQuery(params);
+    return fetchJson(`${BASE_API}/api/reports/kpis${qs ? `?${qs}` : ""}`, { headers: authHeaders() });
+  },
+  getTrends: async (params = {}) => {
+    const qs = toQuery(params);
+    return fetchJson(`${BASE_API}/api/reports/trends${qs ? `?${qs}` : ""}`, { headers: authHeaders() });
+  },
 
   // SUMO
   getSumoStatus: async () =>
