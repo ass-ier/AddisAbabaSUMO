@@ -189,37 +189,39 @@ const Navigation = () => {
             </Link>
           )}
 
-          {user?.role !== "super_admin" && (
-            <>
-              <Link
-                to="/operator/emergencies"
-                className={`sidebar-link ${
-                  isActive("/operator/emergencies") ? "active" : ""
-                }`}
-                onClick={closeMenu}
-                title="Emergencies"
-              >
-                <span className="link-icon">
-                  <ExclamationTriangleIcon className="w-5 h-5" />
-                </span>
-                <span className="link-text">Emergencies</span>
-              </Link>
-              <Link
-                to="/admin/audit"
-                className={`sidebar-link ${
-                  isActive("/admin/audit") ? "active" : ""
-                }`}
-                onClick={closeMenu}
-                title="Activity Log"
-              >
-                <span className="link-icon">
-                  <ClipboardDocumentListIcon className="w-5 h-5" />
-                </span>
-                <span className="link-text">Activity Log</span>
-              </Link>
-              {/* Operator Team link removed */}
-            </>
+          {user?.role === "operator" && (
+            <Link
+              to="/operator/emergencies"
+              className={`sidebar-link ${
+                isActive("/operator/emergencies") ? "active" : ""
+              }`}
+              onClick={closeMenu}
+              title="Emergencies"
+            >
+              <span className="link-icon">
+                <ExclamationTriangleIcon className="w-5 h-5" />
+              </span>
+              <span className="link-text">Emergencies</span>
+            </Link>
           )}
+
+          {(user?.role === "operator" || user?.role === "analyst") && (
+            <Link
+              to="/admin/audit"
+              className={`sidebar-link ${
+                isActive("/admin/audit") ? "active" : ""
+              }`}
+              onClick={closeMenu}
+              title="Activity Log"
+            >
+              <span className="link-icon">
+                <ClipboardDocumentListIcon className="w-5 h-5" />
+              </span>
+              <span className="link-text">Activity Log</span>
+            </Link>
+          )}
+
+          {/* Operator Team link removed */}
 
           {user?.role === "super_admin" && (
             <>
