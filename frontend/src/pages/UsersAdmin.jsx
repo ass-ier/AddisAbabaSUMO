@@ -19,6 +19,8 @@ export default function UsersAdmin() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [pwdModal, setPwdModal] = useState({ open: false, username: "", pwd: "" });
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [errorTimeout, setErrorTimeout] = useState(null);
   
   // OTP-related state
   const [showOTP, setShowOTP] = useState(false);
@@ -49,7 +51,29 @@ export default function UsersAdmin() {
   }, []);
 
   const sendOTP = async (email) => {
-    // Validate email before sending
+    // Validate all required fields before sending OTP
+    const allErrors = {};
+    const requiredFields = ['firstName', 'lastName', 'username', 'email', 'password'];
+    
+    requiredFields.forEach(key => {
+      const errors = validateField(key, form[key]);
+      Object.assign(allErrors, errors);
+    });
+    
+    // Check for empty required fields
+    if (!form.firstName) allErrors.firstName = 'First name is required';
+    if (!form.lastName) allErrors.lastName = 'Last name is required';
+    if (!form.username) allErrors.username = 'Username is required';
+    if (!form.email) allErrors.email = 'Email is required';
+    if (!form.password) allErrors.password = 'Password is required';
+    
+    if (Object.keys(allErrors).length > 0) {
+      showErrorWithTimeout(allErrors);
+      setMessage("Please fill all required fields correctly before sending verification code");
+      return;
+    }
+    
+    // Validate email format
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setMessage("Please enter a valid email address");
       return;
@@ -93,6 +117,11 @@ export default function UsersAdmin() {
     setOtpVerified(isVerified);
     if (isVerified) {
       setMessage("OTP verified successfully! You can now create the user.");
+      
+      // Auto-dismiss success message after 3 seconds
+      setTimeout(() => {
+        setMessage("");
+      }, 3000);
     }
   };
 
@@ -103,13 +132,127 @@ export default function UsersAdmin() {
     setSendingOTP(false);
   };
 
+  const validateField = (name, value) => {
+    const errors = {};
+    
+    switch (name) {
+      case 'firstName':
+        if (!/^[a-zA-Z][a-zA-Z\s'-]*$/.test(value) && value !== '') {
+          errors.firstName = 'First name must start with a letter and contain only letters, spaces, hyphens, and apostrophes';
+        } else if (value.length > 0 && value.length < 2) {
+          errors.firstName = 'First name must be at least 2 characters long';
+        }
+        break;
+      
+      case 'lastName':
+        if (!/^[a-zA-Z][a-zA-Z\s'-]*$/.test(value) && value !== '') {
+          errors.lastName = 'Last name must start with a letter and contain only letters, spaces, hyphens, and apostrophes';
+        } else if (value.length > 0 && value.length < 2) {
+          errors.lastName = 'Last name must be at least 2 characters long';
+        }
+        break;
+      
+      case 'username':
+        if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(value) && value !== '') {
+          errors.username = 'Username must start with a letter and contain only letters, numbers, and underscores';
+        } else if (value.length > 0 && value.length < 3) {
+          errors.username = 'Username must be at least 3 characters long';
+        }
+        break;
+      
+      case 'email':
+        if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+          errors.email = 'Please enter a valid email address';
+        }
+        break;
+      
+      case 'password':
+        if (value.length > 0 && value.length < 6) {
+          errors.password = 'Password must be at least 6 characters long';
+        } else if (value && !/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d@$!%*#?&]/.test(value)) {
+          errors.password = 'Password must contain at least one letter and one number';
+        }
+        break;
+      
+      case 'region':
+        if (value && !/^[a-zA-Z][a-zA-Z\s-]*$/.test(value)) {
+          errors.region = 'Region must start with a letter and contain only letters, spaces, and hyphens';
+        }
+        break;
+      
+      case 'phoneNumber':
+        if (value && !/^[+]?[0-9\s()-]*$/.test(value)) {
+          errors.phoneNumber = 'Phone number can only contain numbers, spaces, parentheses, hyphens, and plus sign';
+        } else if (value && value.replace(/[^0-9]/g, '').length < 10) {
+          errors.phoneNumber = 'Phone number must contain at least 10 digits';
+        }
+        break;
+      
+      default:
+        break;
+    }
+    
+    return errors;
+  };
+
+  const showErrorWithTimeout = (errors) => {
+    // Clear existing timeout if any
+    if (errorTimeout) {
+      clearTimeout(errorTimeout);
+      setErrorTimeout(null);
+    }
+    
+    // Set errors without auto-dismiss
+    setFieldErrors(errors);
+  };
+
+  const handleFieldChange = (name, value) => {
+    // Update form value
+    setForm({ ...form, [name]: value });
+    
+    // Validate the field
+    const errors = validateField(name, value);
+    
+    if (Object.keys(errors).length > 0) {
+      // Show error and keep it visible
+      setFieldErrors(prev => ({ ...prev, ...errors }));
+    } else {
+      // Clear error for this field only when it's valid
+      setFieldErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[name];
+        return newErrors;
+      });
+      
+      // Clear top-level message if it's about this field (especially email validation)
+      if (name === 'email' && message.includes('valid email')) {
+        setMessage("");
+      }
+    }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setMessage("");
     
+    // Validate all fields before submission
+    const allErrors = {};
+    ['firstName', 'lastName', 'username', 'email', 'password', 'region', 'phoneNumber'].forEach(key => {
+      const errors = validateField(key, form[key]);
+      Object.assign(allErrors, errors);
+    });
+    
+    if (Object.keys(allErrors).length > 0) {
+      showErrorWithTimeout(allErrors);
+      setMessage("Please fix the validation errors before submitting");
+      setTimeout(() => setMessage(""), 4000);
+      return;
+    }
+    
     // Check if OTP verification is required and completed
     if (!otpVerified) {
       setMessage("Please verify your OTP before creating the user.");
+      setTimeout(() => setMessage(""), 4000);
       return;
     }
     
@@ -151,6 +294,7 @@ export default function UsersAdmin() {
         phoneNumber: "",
       });
       resetOTPState();
+      setFieldErrors({});
       setMessage("User created successfully");
       
       // Auto-dismiss success message after 5 seconds
@@ -161,9 +305,13 @@ export default function UsersAdmin() {
       // If we appended above, we've already updated the UI. Otherwise load() was called.
     } catch (error) {
       console.error("Error creating user:", error);
-      setMessage(
-        "Failed to create user: " + (error.message || "Unknown error")
-      );
+      const errorMsg = "Failed to create user: " + (error.message || "Unknown error");
+      setMessage(errorMsg);
+      
+      // Auto-dismiss error message
+      setTimeout(() => {
+        setMessage("");
+      }, 5000);
     }
   };
 
@@ -306,11 +454,13 @@ export default function UsersAdmin() {
                 id="firstName"
                 placeholder="Enter first name"
                 value={form.firstName}
-                onChange={(e) =>
-                  setForm({ ...form, firstName: e.target.value })
-                }
+                onChange={(e) => handleFieldChange('firstName', e.target.value)}
+                className={fieldErrors.firstName ? 'input-error' : ''}
                 required
               />
+              {fieldErrors.firstName && (
+                <div className="field-error-message">{fieldErrors.firstName}</div>
+              )}
             </div>
 
             <div className="form-group">
@@ -320,9 +470,13 @@ export default function UsersAdmin() {
                 id="lastName"
                 placeholder="Enter last name"
                 value={form.lastName}
-                onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                onChange={(e) => handleFieldChange('lastName', e.target.value)}
+                className={fieldErrors.lastName ? 'input-error' : ''}
                 required
               />
+              {fieldErrors.lastName && (
+                <div className="field-error-message">{fieldErrors.lastName}</div>
+              )}
             </div>
 
             <div className="form-group">
@@ -332,9 +486,13 @@ export default function UsersAdmin() {
                 id="username"
                 placeholder="Enter username"
                 value={form.username}
-                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                onChange={(e) => handleFieldChange('username', e.target.value)}
+                className={fieldErrors.username ? 'input-error' : ''}
                 required
               />
+              {fieldErrors.username && (
+                <div className="field-error-message">{fieldErrors.username}</div>
+              )}
             </div>
 
             <div className="form-group">
@@ -344,10 +502,14 @@ export default function UsersAdmin() {
                 id="email"
                 placeholder="Enter email"
                 value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                onChange={(e) => handleFieldChange('email', e.target.value)}
+                className={fieldErrors.email ? 'input-error' : ''}
                 required
                 disabled={showOTP && !otpVerified}
               />
+              {fieldErrors.email && (
+                <div className="field-error-message">{fieldErrors.email}</div>
+              )}
             </div>
 
             <div className="form-group">
@@ -357,10 +519,14 @@ export default function UsersAdmin() {
                 id="password"
                 placeholder="Enter password (min 6 characters)"
                 value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                onChange={(e) => handleFieldChange('password', e.target.value)}
+                className={fieldErrors.password ? 'input-error' : ''}
                 required
                 minLength={6}
               />
+              {fieldErrors.password && (
+                <div className="field-error-message">{fieldErrors.password}</div>
+              )}
             </div>
 
             <div className="form-group">
@@ -384,8 +550,12 @@ export default function UsersAdmin() {
                 id="region"
                 placeholder="Enter region (optional)"
                 value={form.region}
-                onChange={(e) => setForm({ ...form, region: e.target.value })}
+                onChange={(e) => handleFieldChange('region', e.target.value)}
+                className={fieldErrors.region ? 'input-error' : ''}
               />
+              {fieldErrors.region && (
+                <div className="field-error-message">{fieldErrors.region}</div>
+              )}
             </div>
 
             <div className="form-group">
@@ -395,10 +565,12 @@ export default function UsersAdmin() {
                 id="phoneNumber"
                 placeholder="Enter phone number (optional)"
                 value={form.phoneNumber}
-                onChange={(e) =>
-                  setForm({ ...form, phoneNumber: e.target.value })
-                }
+                onChange={(e) => handleFieldChange('phoneNumber', e.target.value)}
+                className={fieldErrors.phoneNumber ? 'input-error' : ''}
               />
+              {fieldErrors.phoneNumber && (
+                <div className="field-error-message">{fieldErrors.phoneNumber}</div>
+              )}
             </div>
 
             {/* Send Verification Code Button */}

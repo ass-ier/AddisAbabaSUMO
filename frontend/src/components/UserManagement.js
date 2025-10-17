@@ -17,6 +17,8 @@ const UserManagement = () => {
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [errorTimeout, setErrorTimeout] = useState(null);
 
   useEffect(() => {
     if (user?.role === "super_admin") {
@@ -41,28 +43,113 @@ const UserManagement = () => {
     e.preventDefault();
     setError("");
     setSuccess("");
+    
+    // Validate all fields before submission
+    const allErrors = {};
+    Object.keys(newUser).forEach(key => {
+      const errors = validateField(key, newUser[key]);
+      Object.assign(allErrors, errors);
+    });
+    
+    if (Object.keys(allErrors).length > 0) {
+      showErrorWithTimeout(allErrors);
+      return;
+    }
 
     try {
       await axios.post("/api/register", newUser);
       setSuccess("User created successfully");
+      
+      // Auto-dismiss success message
+      setTimeout(() => {
+        setSuccess("");
+      }, 3000);
+      
       setNewUser({
         username: "",
         password: "",
         role: "operator",
         region: "",
       });
+      setFieldErrors({});
       setShowAddForm(false);
       fetchUsers();
     } catch (error) {
-      setError(error.response?.data?.message || "Failed to create user");
+      const errorMsg = error.response?.data?.message || "Failed to create user";
+      setError(errorMsg);
+      
+      // Auto-dismiss error message
+      setTimeout(() => {
+        setError("");
+      }, 5000);
     }
   };
 
+  const validateField = (name, value) => {
+    const errors = {};
+    
+    switch (name) {
+      case 'username':
+        if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(value) && value !== '') {
+          errors.username = 'Username must start with a letter and contain only letters, numbers, and underscores';
+        } else if (value.length > 0 && value.length < 3) {
+          errors.username = 'Username must be at least 3 characters long';
+        }
+        break;
+      
+      case 'password':
+        if (value.length > 0 && value.length < 6) {
+          errors.password = 'Password must be at least 6 characters long';
+        }
+        break;
+      
+      case 'region':
+        if (value && !/^[a-zA-Z\s-]+$/.test(value)) {
+          errors.region = 'Region must contain only letters, spaces, and hyphens';
+        }
+        break;
+      
+      default:
+        break;
+    }
+    
+    return errors;
+  };
+
+  const showErrorWithTimeout = (errors) => {
+    // Clear existing timeout if any
+    if (errorTimeout) {
+      clearTimeout(errorTimeout);
+      setErrorTimeout(null);
+    }
+    
+    // Set errors without auto-dismiss
+    setFieldErrors(errors);
+  };
+
   const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    
+    // Update the field value
     setNewUser({
       ...newUser,
-      [e.target.name]: e.target.value,
+      [name]: value,
     });
+    
+    // Validate the field
+    const errors = validateField(name, value);
+    
+    if (Object.keys(errors).length > 0) {
+      // Show error and keep it visible
+      setFieldErrors(prev => ({ ...prev, ...errors }));
+    } else {
+      // Clear error for this field only when it's valid
+      setFieldErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[name];
+        return newErrors;
+      });
+    }
   };
 
   const getRoleBadge = (role) => {
@@ -124,7 +211,11 @@ const UserManagement = () => {
                 onChange={handleInputChange}
                 required
                 placeholder="Enter username"
+                className={fieldErrors.username ? 'input-error' : ''}
               />
+              {fieldErrors.username && (
+                <div className="field-error-message">{fieldErrors.username}</div>
+              )}
             </div>
 
             <div className="form-group">
@@ -137,7 +228,11 @@ const UserManagement = () => {
                 onChange={handleInputChange}
                 required
                 placeholder="Enter password"
+                className={fieldErrors.password ? 'input-error' : ''}
               />
+              {fieldErrors.password && (
+                <div className="field-error-message">{fieldErrors.password}</div>
+              )}
             </div>
 
             <div className="form-group">
@@ -163,7 +258,11 @@ const UserManagement = () => {
                 value={newUser.region}
                 onChange={handleInputChange}
                 placeholder="Enter region (optional)"
+                className={fieldErrors.region ? 'input-error' : ''}
               />
+              {fieldErrors.region && (
+                <div className="field-error-message">{fieldErrors.region}</div>
+              )}
             </div>
 
             <div className="form-actions">
