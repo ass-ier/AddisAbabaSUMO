@@ -114,11 +114,6 @@ const Navigation = () => {
               </span>
             </button>
           </div>
-
-          {/* Status Section */}
-          <div className="sidebar-status">
-            <RealTimeStatus showDetails={menuOpen} />
-          </div>
         </div>
 
         <div className="sidebar-menu">
