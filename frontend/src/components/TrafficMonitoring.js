@@ -4,6 +4,7 @@ import "./TrafficMonitoring.css";
 import PageLayout from "./PageLayout";
 import { api, BASE_API } from "../utils/api";
 import LiveIntersectionMap from "./LiveIntersectionMap";
+import TrafficLightModal from "./TrafficLightModal";
 
 const TrafficMonitoring = () => {
   const [trafficData, setTrafficData] = useState([]); // raw or aggregated depending on mode
@@ -18,6 +19,7 @@ const TrafficMonitoring = () => {
   const [simRunning, setSimRunning] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
   const [liveStats, setLiveStats] = useState({ visibleVehicles: 0, avgSpeedMs: 0 });
+  const [tlsModal, setTlsModal] = useState({ open: false, id: null, timing: {}, program: {}, currentPhase: null });
   const socketRef = useRef(null);
   const statusPollRef = useRef(null);
   const liveBucketsRef = useRef(new Map());
@@ -378,6 +380,7 @@ const TrafficMonitoring = () => {
                 intersectionId={filters.intersectionId}
                 paddingMeters={150}
                 onStats={(s) => setLiveStats(s)}
+                onTlsClick={(id, live) => setTlsModal({ open: true, id, timing: live?.timing || {}, program: live?.program || {}, currentPhase: { currentIndex: live?.timing?.currentIndex } })}
               />
             ) : (
               <div className="no-data">
@@ -525,6 +528,17 @@ const TrafficMonitoring = () => {
           )}
         </div>
       </div>
+
+      {tlsModal.open && (
+        <TrafficLightModal
+          tlsId={tlsModal.id}
+          isOpen={tlsModal.open}
+          onClose={() => setTlsModal({ open: false, id: null, timing: {}, program: {}, currentPhase: null })}
+          currentPhase={tlsModal.currentPhase}
+          timing={tlsModal.timing}
+          program={tlsModal.program}
+        />
+      )}
     </PageLayout>
   );
 };

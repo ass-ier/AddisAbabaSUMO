@@ -49,12 +49,13 @@ function withinBounds([lat, lng], b) {
   return lat >= sw.lat && lat <= ne.lat && lng >= sw.lng && lng <= ne.lng;
 }
 
-const LiveIntersectionMap = ({ intersectionId, paddingMeters = 120, height = 380, onStats }) => {
+const LiveIntersectionMap = ({ intersectionId, paddingMeters = 120, height = 380, onStats, onTlsClick }) => {
   const [net, setNet] = useState({ lanes: [], junctions: [], junctionPoints: [], tls: [], bounds: null });
   const [viewBounds, setViewBounds] = useState(null);
   const [lanesInView, setLanesInView] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [simNetLanes, setSimNetLanes] = useState([]); // lanes from live sim (CRS.Simple)
+  const [tlsLiveMap, setTlsLiveMap] = useState(new Map()); // id -> live tls data
   const socketRef = useRef(null);
   const mapRef = useRef(null);
 
@@ -134,6 +135,19 @@ const LiveIntersectionMap = ({ intersectionId, paddingMeters = 120, height = 380
             return { id: l.id, edgeId, points: pts, speed: l.speed };
           });
         setSimNetLanes(xyLanes);
+      } else if (Array.isArray(payload.tls)) {
+        const m = new Map(
+          payload.tls
+            .filter((t) => t && typeof t.id === "string")
+            .map((t) => [t.id, {
+              id: t.id,
+              state: t.state,
+              sides: t.sides,
+              timing: t.timing,
+              program: t.program,
+            }])
+        );
+        setTlsLiveMap(m);
       }
     };
 
@@ -230,6 +244,26 @@ const LiveIntersectionMap = ({ intersectionId, paddingMeters = 120, height = 380
     return classes;
   }, [edgeGeoms, visible, viewBounds]);
 
+  // TLS icon similar to TrafficMap enhanced icon
+  const createEnhancedTlsIcon = (stateStr) => {
+    const s = String(stateStr || "").toLowerCase();
+    let red = 0, yellow = 0, green = 0;
+    for (const ch of s) {
+      if (ch === "r" || ch === "o") red += 1; else if (ch === "y") yellow += 1; else if (ch === "g") green += 1;
+    }
+    const total = Math.max(1, red + yellow + green);
+    const bar = (color, pct) => `<div style=\"height:4px;background:${color};width:${Math.max(8, Math.round(pct * 16))}px;border-radius:2px\"></div>`;
+    const html = `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:2px 3px;background:rgba(0,0,0,0.55);border-radius:4px;color:#fff">
+        <div style="display:flex;gap:2px;align-items:center;justify-content:center">
+          ${bar("#D7263D", red/total)}
+          ${bar("#FFC107", yellow/total)}
+          ${bar("#25A244", green/total)}
+        </div>
+      </div>`;
+    return L.divIcon({ className: "tls-dynamic-icon", html, iconSize: [24, 20], iconAnchor: [12, 10] });
+  };
+
   const mapStyle = { height, width: "100%", borderRadius: 12, overflow: "hidden" };
 
   return (
@@ -288,6 +322,26 @@ const LiveIntersectionMap = ({ intersectionId, paddingMeters = 120, height = 380
           {congestedClasses.red.length > 0 && (
             <Polyline positions={congestedClasses.red} color="#F44336" weight={6} opacity={0.9} lineCap="round" lineJoin="round" />
           )}
+
+          {/* TLS markers (click to open control) */}
+          {Array.isArray(net.tls) && net.tls
+            .filter((t) => withinBounds([t.lat, t.lng], viewBounds))
+            .map((t) => {
+              const live = tlsLiveMap.get(t.id) || {};
+              const icon = createEnhancedTlsIcon(live.state);
+              return (
+                <Marker
+                  key={`tls_${t.id}`}
+                  position={[t.lat, t.lng]}
+                  icon={icon}
+                  eventHandlers={{
+                    click: () => {
+                      if (typeof onTlsClick === "function") onTlsClick(t.id, live);
+                    },
+                  }}
+                />
+              );
+            })}
 
           {/* Vehicles as triangles */}
           {visible.map((v) => (
