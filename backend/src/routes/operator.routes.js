@@ -1,6 +1,7 @@
 const express = require('express');
 const operatorController = require('../controllers/operator.controller');
 const userManagementController = require('../controllers/user-management.controller');
+const emergencyController = require('../controllers/emergency.controller');
 const auth = require('../middleware/auth');
 const validation = require('../middleware/validation');
 const { body, param, query } = require('express-validator');
@@ -20,6 +21,9 @@ router.get('/dashboard', operatorController.getDashboard);
 
 // Get traffic overview for operators
 router.get('/traffic/overview', operatorController.getTrafficOverview);
+
+// Get operator emergencies enriched with vehicles and sim status
+router.get('/emergencies', operatorController.getOperatorEmergencies);
 
 // Get activity summary
 router.get('/activity/summary', [

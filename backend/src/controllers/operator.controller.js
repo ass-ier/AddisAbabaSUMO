@@ -2,6 +2,9 @@ const systemMonitoringService = require('../services/system-monitoring.service')
 const operatorAnalyticsService = require('../services/operator-analytics.service');
 const trafficService = require('../services/traffic.service');
 const auditService = require('../services/audit.service');
+const emergencyService = require('../services/emergency.service');
+const sumoState = require('../services/sumo-state.service');
+const SimulationStatus = require('../models/SimulationStatus');
 const logger = require('../utils/logger');
 
 /**
@@ -126,6 +129,34 @@ class OperatorController {
       res.status(500).json({
         success: false,
         message: 'Failed to export system metrics',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get operator emergencies with live SUMO context (vehicles snapshot, sim status)
+   * GET /api/operator/emergencies
+   */
+  async getOperatorEmergencies(req, res) {
+    try {
+      const emergencies = await emergencyService.getActiveEmergencies();
+      let simStatus = null;
+      try {
+        simStatus = await SimulationStatus.findOne().sort({ lastUpdated: -1 });
+      } catch (_) {}
+
+      const vehicles = sumoState.getLatestVehiclesSnapshot();
+      res.json({
+        items: emergencies?.items || [],
+        vehicles,
+        simulation: simStatus || null
+      });
+    } catch (error) {
+      logger.error('Error getting operator emergencies', { error: error.message });
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get emergencies',
         error: error.message
       });
     }

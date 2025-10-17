@@ -32,8 +32,8 @@ module.exports = function createSumoTlsRoutes(dependencies) {
     mapSettings
   } = dependencies;
 
-  // Latest compact vehicles snapshot for bridge health/debug
-  let latestVehiclesSnapshot = { timestamp: 0, vehicles: [] };
+  // Latest compact vehicles snapshot held in shared service
+  const sumoState = require('../services/sumo-state.service');
 
   // Helper to send commands to SUMO bridge
   function sendBridgeCommand(obj) {
@@ -55,7 +55,7 @@ module.exports = function createSumoTlsRoutes(dependencies) {
       res.json({
         ok: true,
         status: running ? 'running' : 'stopped',
-        latest: latestVehiclesSnapshot,
+        latest: sumoState.getLatestVehiclesSnapshot(),
         process: proc || null,
         serverTime: Date.now(),
       });
@@ -78,7 +78,7 @@ module.exports = function createSumoTlsRoutes(dependencies) {
       io.emit('viz', vizPayload);
       // Also compact
       const compact = { timestamp: vizPayload.ts, vehicles: pts.map(p => ({ id: p.id, x: p.x, y: p.y, speed: p.speed })) };
-      latestVehiclesSnapshot = compact;
+      sumoState.setLatestVehiclesSnapshot(compact);
       io.emit('vehicles', compact);
       res.json({ ok: true, sent: pts.length, center: { x, y } });
     } catch (e) {
@@ -521,7 +521,7 @@ module.exports = function createSumoTlsRoutes(dependencies) {
                           }))
                         : [],
                     };
-                    latestVehiclesSnapshot = compact;
+                    sumoState.setLatestVehiclesSnapshot(compact);
                     io.emit('vehicles', compact);
                   } catch (_) {}
                   

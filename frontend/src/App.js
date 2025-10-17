@@ -27,9 +27,6 @@ const UsersAdmin = React.lazy(() => import("./pages/UsersAdmin"));
 const AuditLogs = React.lazy(() => import("./pages/AuditLogs"));
 const ReportsAdmin = React.lazy(() => import("./pages/ReportsAdmin"));
 const EmergencyPanel = React.lazy(() => import("./pages/EmergencyPanel"));
-const OperatorEmergencies = React.lazy(
-  () => import("./pages/operator/OperatorEmergencies")
-);
 const OperatorAuditLogs = React.lazy(
   () => import("./pages/operator/OperatorAuditLogs")
 );
@@ -161,7 +158,7 @@ function AppContent() {
             path="/operator/emergencies"
             element={
               user && user.role !== "super_admin" ? (
-                <OperatorEmergencies />
+                <EmergencyPanel />
               ) : (
                 <Navigate to="/dashboard" />
               )
