@@ -1,10 +1,23 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import PageLayout from "../components/PageLayout";
+import EmergencyOps from "../modules/emergency/EmergencyOps";
+import { FEATURES } from "../config/features";
 import { api } from "../utils/api";
 import io from "socket.io-client";
 
 export default function EmergencyPanel() {
-  // Active emergencies
+  // Feature-flag: render new Emergency Operations module or fallback to legacy panel
+  if (FEATURES.emergencyOps) {
+    return (
+      <PageLayout title="Emergency Operations" subtitle="Live emergency vehicles, routes, and stats (beta)">
+        <div style={{ height: "calc(100vh - 180px)", minHeight: 480 }}>
+          <EmergencyOps />
+        </div>
+      </PageLayout>
+    );
+  }
+
+  // Legacy panel fallback
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isRunning, setIsRunning] = useState(false);

@@ -1,0 +1,23 @@
+{
+  "vehicles_sample": {
+    "timestamp": 1739726400000,
+    "vehicles": [
+      {"vehicleId": "AMB-101", "x": 100.0, "y": 200.0, "speed": 12.4, "heading": 45, "vehicleType": "ambulance", "emergencyState": "en-route", "routeId": "R-AMB-101"},
+      {"vehicleId": "FIRE-7", "x": 130.0, "y": 220.0, "speed": 8.9, "heading": 180, "vehicleType": "fire", "emergencyState": "dispatched"},
+      {"vehicleId": "POL-42", "x": 160.0, "y": 210.0, "speed": 14.2, "heading": 320, "vehicleType": "police", "emergencyState": "on-scene"}
+    ]
+  },
+  "routes_sample": {
+    "timestamp": 1739726401000,
+    "routes": [
+      {
+        "routeId": "R-AMB-101",
+        "coords": [[100.0,200.0],[110.0,205.0],[125.0,212.0],[140.0,220.0],[160.0,230.0]],
+        "origin": {"name": "Station A"},
+        "destination": {"name": "Incident I-55"},
+        "eta": "3m",
+        "assignedVehicleId": "AMB-101"
+      }
+    ]
+  }
+}
