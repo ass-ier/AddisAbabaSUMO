@@ -1459,54 +1459,6 @@ const TrafficMap = () => {
                 });
               })()}
 
-            {/* Emergency vehicles only - show only if they actually exist in the simulation data */}
-            {Array.isArray(mapData?.vehicles) &&
-              mapData.vehicles
-                .filter((v) => {
-                  const isEmergency =
-                    v.type === "ambulance" ||
-                    v.type === "fire_truck" ||
-                    v.type === "police";
-                  const hasValidCoords =
-                    typeof v.netLat === "number" &&
-                    typeof v.netLng === "number";
-                  return isEmergency && hasValidCoords;
-                })
-                .map((v) => (
-                  <Marker
-                    key={v.id}
-                    position={[v.netLat, v.netLng]}
-                    icon={createEmergencyVehicleIcon(v)}
-                  >
-                    <Popup>
-                      <div>
-                        <div>
-                          <strong>🚨 Emergency Vehicle {v.id}</strong>
-                        </div>
-                        <div>
-                          Type: {v.type.replace("_", " ").toUpperCase()}
-                        </div>
-                        {typeof v.speed === "number" && (
-                          <div>Speed: {v.speed.toFixed(1)} m/s</div>
-                        )}
-                        <div>Edge: {v.edgeId || v.laneId || "Unknown"}</div>
-                        <div>
-                          Coordinates: [{v.netLat?.toFixed(2)},{" "}
-                          {v.netLng?.toFixed(2)}]
-                        </div>
-                        <div
-                          style={{
-                            color: "#E53935",
-                            fontWeight: "bold",
-                            marginTop: "8px",
-                          }}
-                        >
-                          PRIORITY VEHICLE
-                        </div>
-                      </div>
-                    </Popup>
-                  </Marker>
-                ))}
           </MapContainer>
         </div>
       </div>
