@@ -303,6 +303,14 @@ server.listen(PORT, () => {
   
   // Start real-time broadcasting
   startRealTimeDataBroadcasting();
+
+  // Start hourly backup job if enabled
+  try {
+    const { initBackupJob } = require('./src/services/backup.job');
+    initBackupJob({ port: PORT });
+  } catch (e) {
+    logger.warn('Backup job not started:', e?.message || e);
+  }
 });
 
 // ===== Graceful Shutdown =====
