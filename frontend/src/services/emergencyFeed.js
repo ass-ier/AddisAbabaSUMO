@@ -138,6 +138,48 @@ export class EmergencyFeedClient {
 
       this.socket.on("viz", mapVizToEmergency);
       this.socket.on("sumoData", mapVizToEmergency);
+
+      // Direct vehicles stream (e.g., ["vehicles", { timestamp, vehicles: [...] }])
+      this.socket.on("vehicles", (frame) => {
+        try {
+          if (!frame || !Array.isArray(frame.vehicles)) return;
+
+          const matchAny = String(process.env.REACT_APP_EMERGENCY_MATCH_ANY || "false").toLowerCase() === "true";
+          const typeWhitelist = String(process.env.REACT_APP_EMERGENCY_VTYPES || "ambulance,firetruck,police,vip,vip_escort")
+            .split(",")
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean);
+
+          const list = frame.vehicles
+            .map((v) => {
+              const inferred = inferTypeFromId(v.id || v.vehicleId);
+              return {
+                vehicleId: v.id || v.vehicleId,
+                x: v.x,
+                y: v.y,
+                speed: v.speed,
+                heading: v.heading || v.angle,
+                vehicleType: inferred,
+                emergencyState: "en-route",
+                routeId: v.routeId,
+              };
+            })
+            .filter((rec) => matchAny || typeWhitelist.includes(String(rec.vehicleType).toLowerCase()));
+
+          if (list.length) this._emit("vehicleFrame", { timestamp: frame.timestamp || Date.now(), vehicles: list });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn("vehicles->emergency mapping failed", e);
+        }
+      });
+
+      const inferTypeFromId = (id) => {
+        const s = String(id || "").toLowerCase();
+        if (s.includes("ambulance")) return "ambulance";
+        if (s.includes("fire")) return "fire"; // matches firetruck/fire_truck
+        if (s.includes("police")) return "police";
+        return "other";
+      };
     });
   }
 

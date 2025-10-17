@@ -133,20 +133,24 @@ export default function EmergencyOps() {
       if (!mounted || !frame) return;
       const ts = frame.timestamp || Date.now();
       const list = Array.isArray(frame.routes) ? frame.routes : [frame];
-      setRoutes((prev) => {
-        const m = new Map(prev);
-        for (const r of list) {
-          if (!r || !r.routeId || !Array.isArray(r.coords)) continue;
-          m.set(r.routeId, {
-            routeId: r.routeId,
-            coords: r.coords.map((p) => [p[1] ?? p.y, p[0] ?? p.x]), // [[y,x]] -> [lat, lng]
-            origin: r.origin, destination: r.destination,
-            eta: r.eta, assignedVehicleId: r.assignedVehicleId,
-            color: colorForId(r.routeId), lastTs: ts,
-          });
-        }
-        return m;
-      });
+        setRoutes((prev) => {
+          const m = new Map(prev);
+          for (const r of list) {
+            if (!r || !r.routeId || !Array.isArray(r.coords)) continue;
+            m.set(r.routeId, {
+              routeId: r.routeId,
+              coords: r.coords.map((p) => [p[1] ?? p.y, p[0] ?? p.x]), // [[y,x]] -> [lat, lng]
+              origin: r.origin, destination: r.destination,
+              eta: r.eta, assignedVehicleId: r.assignedVehicleId,
+              color: colorForId(r.routeId), lastTs: ts,
+            });
+          }
+          try {
+            // Expose for zoom fallback
+            window.__emgRoutes = Object.fromEntries(Array.from(m.entries()).map(([k,v])=>[k,{ coords: v.coords }]));
+          } catch(_) {}
+          return m;
+        });
     });
 
     // attempt connection (non-blocking for debug injection)
@@ -184,6 +188,7 @@ export default function EmergencyOps() {
               color: colorForId(r.routeId), lastTs: r.timestamp || Date.now(),
             });
           }
+          try { window.__emgRoutes = Object.fromEntries(Array.from(m.entries()).map(([k,v])=>[k,{ coords: v.coords }])); } catch(_) {}
           setRoutes(m);
         }
       });
@@ -212,12 +217,31 @@ export default function EmergencyOps() {
 
   const throttledVehicles = useThrottle(visibleVehicles, 50);
 
+  // If a vehicle is selected, only show that one on the map (per user request)
+  const displayVehicles = useMemo(() => {
+    if (!selectedId) return throttledVehicles;
+    return throttledVehicles.filter((v) => v.vehicleId === selectedId);
+  }, [throttledVehicles, selectedId]);
+
   // auto-follow
   const mapRef = useRef(null);
   useEffect(() => {
     if (!autoFollow || !selected || !mapRef.current) return;
     try { mapRef.current.setView([selected.netLat, selected.netLng], Math.max(14, mapRef.current.getZoom())); } catch (_) {}
   }, [autoFollow, selected]);
+
+  // Local handler: zoom by factor to a vehicle's SUMO position (waits for map load if needed)
+  const handleZoomTo = (veh, factor = 5) => {
+    if (!veh) return;
+    const ll = sumoToLeafletLatLng(veh);
+    const map = mapRef.current;
+    if (!ll || !map) return;
+    const doIt = () => performZoomFactor(map, ll, factor);
+    try {
+      if (map._loaded === false && typeof map.once === "function") { map.once("load", doIt); }
+      else doIt();
+    } catch (_) { doIt(); }
+  };
 
   return (
     <div className="emg-ops-root">
@@ -259,7 +283,7 @@ export default function EmergencyOps() {
 
         {/* Map and details */}
         <div className="emg-map-panel">
-          <MapContainer crs={L.CRS.Simple} whenCreated={(m)=> (mapRef.current=m)} style={{ width:"100%", height:"100%" }} zoomControl={true} minZoom={-5} maxZoom={24} preferCanvas>
+          <MapContainer crs={L.CRS.Simple} whenCreated={(m)=> { mapRef.current=m; }} style={{ width:"100%", height:"100%" }} zoomControl={true} minZoom={-5} maxZoom={24} preferCanvas>
             {net.bounds && (
               <FitToBounds bounds={L.latLngBounds([net.bounds.minY, net.bounds.minX],[net.bounds.maxY, net.bounds.maxX])} />
             )}
@@ -267,13 +291,17 @@ export default function EmergencyOps() {
             {net.lanes?.length>0 && (
               <Polyline positions={net.lanes.map(l=>l.points)} pathOptions={{ color:"#9ea3a8", weight:6, opacity:0.85 }} />
             )}
-            {/* Routes */}
-            {enabled && Array.from(routes.values()).map((r)=> (
-              <Polyline key={r.routeId} positions={r.coords} pathOptions={{ color: r.color, weight: selected?.routeId===r.routeId?6:3, opacity: selected?.routeId===r.routeId?Math.min(1, opacity+0.2):opacity }} />
+            {/* Routes: show only selected route when a vehicle is selected; otherwise show all */}
+            {enabled && (selectedRoute ? (
+              <Polyline key={selectedRoute.routeId} positions={selectedRoute.coords} pathOptions={{ color: selectedRoute.color || "#00BCD4", weight: 6, opacity: Math.min(1, opacity+0.2) }} />
+            ) : (
+              Array.from(routes.values()).map((r)=> (
+                <Polyline key={r.routeId} positions={r.coords} pathOptions={{ color: r.color, weight: 3, opacity }} />
+              ))
             ))}
             {/* Vehicles */}
-            {enabled && throttledVehicles.map((v)=> (
-              <Marker key={v.vehicleId} position={[v.netLat, v.netLng]} icon={VehicleIcon({ vehicle: v })} eventHandlers={{ click: () => handleSelect(v.vehicleId) }}>
+            {enabled && displayVehicles.map((v)=> (
+              <Marker key={v.vehicleId} position={[v.netLat, v.netLng]} icon={VehicleIcon({ vehicle: v })} eventHandlers={{ click: () => { handleSelect(v.vehicleId); handleZoomTo(v, 5); } }}>
                 <Popup>
                   <div>
                     <div><strong>{v.vehicleId}</strong></div>
@@ -302,7 +330,7 @@ export default function EmergencyOps() {
                 <div className="emg-kv"><span>Last update</span><span>{timeAgo(selected.lastTs)}</span></div>
                 <div className="emg-actions">
                   <button onClick={()=>setAutoFollow((v)=>!v)}>{autoFollow?"Stop follow":"Auto-follow"}</button>
-                  <button onClick={()=>zoomToSelected(mapRef.current, selected)}>Zoom to vehicle</button>
+                  <button disabled={!selected} onClick={()=>handleZoomTo(selected, 5)}>Zoom to vehicle</button>
                   {selected.routeId && <button onClick={()=>requestRouteFor(selected, routes, emergencyFeed)}>Fetch route</button>}
                 </div>
                 {selectedRoute && (
@@ -412,12 +440,124 @@ export default function EmergencyOps() {
   function stopDemo() { if (demoTimerRef.current) { clearInterval(demoTimerRef.current); demoTimerRef.current = null; } }
 }
 
-function zoomToSelected(map, v) {
+// SUMO (x,y) -> Leaflet (lat,lng) using CRS.Simple convention (lat=y, lng=x)
+function sumoToLeafletLatLng(v) {
+  // Prefer raw SUMO x,y if provided; else use derived netLat/netLng
+  const x = Number.isFinite(v?.x) ? v.x : (Number.isFinite(v?.netLng) ? v.netLng : undefined);
+  const y = Number.isFinite(v?.y) ? v.y : (Number.isFinite(v?.netLat) ? v.netLat : undefined);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return [y, x];
+}
+
+function panToSelected(map, v, desiredZoom = 18) {
   if (!map || !v) return;
-  const lat = Number.isFinite(v.netLat) ? v.netLat : v.y;
-  const lng = Number.isFinite(v.netLng) ? v.netLng : v.x;
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-  try { map.setView([lat, lng], Math.max(16, map.getZoom()||16)); } catch (_) {}
+  const ll = sumoToLeafletLatLng(v);
+  if (!ll) return;
+  // Clamp zoom to a sensible local-detail range
+  const minZ = 14, maxZ = 20;
+  const z = Math.max(minZ, Math.min(maxZ, desiredZoom));
+  try {
+    if (typeof map.flyTo === "function") {
+      map.flyTo(ll, z, { animate: true, duration: 0.5, easeLinearity: 0.25 });
+    } else {
+      map.setView(ll, z);
+    }
+  } catch(_) {}
+}
+
+// Zoom by multiplicative factor around the vehicle location
+function performZoomFactor(map, ll, factor = 5) {
+  try {
+    // TEMP DEBUG LOG
+    // eslint-disable-next-line no-console
+    console.log("[EMG] performZoomFactor", {
+      mapLoaded: !!map?._loaded,
+      currentZoom: typeof map?.getZoom === "function" ? map.getZoom() : undefined,
+      ll,
+      factor,
+    });
+  } catch (_) {}
+  if (!map || !ll || !Array.isArray(ll) || !Number.isFinite(ll[0]) || !Number.isFinite(ll[1])) return;
+  const minZ = 14, maxZ = 22;
+  const current = (typeof map.getZoom === "function" ? (map.getZoom() ?? 0) : 0);
+  const delta = Math.log2(Math.max(1, factor));
+  const target = Math.max(minZ, Math.min(maxZ, Math.round(current + delta)));
+  const latlng = L.latLng(ll[0], ll[1]);
+
+  const doZoom = () => {
+    try {
+      if (typeof map.stop === "function") map.stop();
+      if (typeof map.setZoomAround === "function") {
+        map.setZoomAround(latlng, target, { animate: true });
+      } else if (typeof map.flyTo === "function") {
+        map.flyTo(latlng, target, { animate: true, duration: 0.5, easeLinearity: 0.25 });
+      } else {
+        map.setView(latlng, target);
+      }
+      try {
+        // eslint-disable-next-line no-console
+        console.log("[EMG] flyTo done", { targetZoom: target });
+      } catch(_) {}
+    } catch(e) {
+      try { console.error("[EMG] zoom error", e); } catch(_) {}
+    }
+  };
+
+  try {
+    // If map not yet loaded, wait for first load event
+    if (map && map._loaded === false && typeof map.once === "function") {
+      // eslint-disable-next-line no-console
+      console.log("[EMG] map not loaded yet, waiting for load");
+      map.once("load", doZoom);
+      return;
+    }
+  } catch(_) {}
+
+  doZoom();
+}
+
+function zoomToSelected(map, v, minZoom = 16) {
+  if (!map || !v) return;
+  const candidates = [];
+  const a = [v.netLat, v.netLng];
+  const b = [v.y, v.x];
+  const c = [v.netLng, v.netLat]; // swapped, in case of mis-ordered coords
+  const d = [v.x, v.y];
+  if (Number.isFinite(a[0]) && Number.isFinite(a[1])) candidates.push(a);
+  if (Number.isFinite(b[0]) && Number.isFinite(b[1])) candidates.push(b);
+  if (Number.isFinite(c[0]) && Number.isFinite(c[1])) candidates.push(c);
+  if (Number.isFinite(d[0]) && Number.isFinite(d[1])) candidates.push(d);
+
+  const z = Math.max(minZoom, map.getZoom ? (map.getZoom() || minZoom) : minZoom);
+  const doZoom = (lat, lng) => {
+    try {
+      if (typeof map.flyTo === "function") map.flyTo([lat, lng], z, { duration: 0.6 });
+      else map.setView([lat, lng], z);
+      return true;
+    } catch (_) { return false; }
+  };
+
+  if (map._loaded === false && typeof map.once === "function") {
+    map.once("load", () => {
+      for (const [lat, lng] of candidates) { if (doZoom(lat, lng)) return; }
+    });
+    return;
+  }
+
+  for (const [lat, lng] of candidates) {
+    if (doZoom(lat, lng)) return;
+  }
+
+  // Fallback: zoom to route if available
+  if (v.routeId && window.__emgRoutes && window.__emgRoutes[v.routeId]) {
+    try {
+      const coords = window.__emgRoutes[v.routeId].coords;
+      if (Array.isArray(coords) && coords.length) {
+        const bounds = L.latLngBounds(coords);
+        map.fitBounds(bounds, { padding: [12,12], maxZoom: z });
+      }
+    } catch (_) {}
+  }
 }
 
 function requestRouteFor(v, routes, feed) {
