@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
-import { MapContainer, Marker, Polyline, Popup, useMap } from "react-leaflet";
+import { MapContainer, Marker, Polyline, Popup, useMap, CircleMarker } from "react-leaflet";
 import { parseSumoNetXml } from "../../utils/sumoNetParser";
 import { EmergencyFeedClient, emergencyFeed } from "../../services/emergencyFeed";
+import TrafficLightModal from "../../components/TrafficLightModal";
 import "leaflet/dist/leaflet.css";
 import "./EmergencyOps.css";
 
@@ -79,12 +80,15 @@ function FitToBounds({ bounds }) {
 }
 
 export default function EmergencyOps() {
-  const [net, setNet] = useState({ lanes: [], bounds: null });
+  const [net, setNet] = useState({ lanes: [], bounds: null, tls: [] });
   const [enabled, setEnabled] = useState(true);
   const [filters, setFilters] = useState({ ambulance: true, fire: true, police: true, other: true });
   const [debug, setDebug] = useState(false);
   const [autoFollow, setAutoFollow] = useState(false);
   const [opacity, setOpacity] = useState(0.5);
+  const [showTls, setShowTls] = useState(true);
+  const [tlsModalOpen, setTlsModalOpen] = useState(false);
+  const [tlsTargetId, setTlsTargetId] = useState("");
 
   const [vehicles, setVehicles] = useState(new Map()); // vehicleId -> rec
   const [routes, setRoutes] = useState(new Map()); // routeId -> rec
@@ -97,7 +101,7 @@ export default function EmergencyOps() {
     let ok = true;
     parseSumoNetXml("/Sumoconfigs/AddisAbaba.net.xml").then((d) => {
       if (!ok) return;
-      setNet(d || { lanes: [], bounds: null });
+      setNet(d || { lanes: [], bounds: null, tls: [] });
     }).catch(() => {});
     return () => { ok = false; };
   }, []);
@@ -360,6 +364,30 @@ export default function EmergencyOps() {
             {net.lanes?.length>0 && (
               <Polyline positions={net.lanes.map(l=>l.points)} pathOptions={{ color:"#4CAF50", weight:6, opacity:0.8 }} />
             )}
+            {/* TLS markers (optional overlay) */}
+            {showTls && Array.isArray(net.tls) && net.tls.map((t) => (
+              <Marker
+                key={`tls_${t.id}`}
+                position={[t.lat, t.lng]}
+                eventHandlers={{
+                  click: () => { setTlsTargetId(t.id); setTlsModalOpen(true); },
+                }}
+              >
+                <Popup>
+                  <div style={{ minWidth: 160 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 6 }}>TLS {t.id}</div>
+                    <button
+                      onClick={() => { setTlsTargetId(t.id); setTlsModalOpen(true); }}
+                      className="action-btn primary"
+                      style={{ padding: "6px 10px", background: "#1976D2", color: "#fff", border: "none", borderRadius: 4 }}
+                    >
+                      🚦 Manual Override
+                    </button>
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
+
             {/* Routes: for selected vehicle, show Google-like progress (traversed vs remaining) */}
             {enabled && (selectedRoute ? (
               <>
@@ -374,7 +402,7 @@ export default function EmergencyOps() {
                   <Polyline
                     key={`${selectedRoute.routeId}_remaining`}
                     positions={routeProgress.remaining}
-                    pathOptions={{ color: selectedRoute.color || "#00BCD4", weight: 7, opacity: Math.min(1, opacity+0.15) }}
+                    pathOptions={{ color: "#FF9800", weight: 7, opacity: Math.min(1, opacity+0.15) }}
                   />
                 )}
                 {/* Origin/Destination markers (subtle) */}
@@ -387,7 +415,7 @@ export default function EmergencyOps() {
               </>
             ) : (
               Array.from(routes.values()).map((r)=> (
-                <Polyline key={r.routeId} positions={r.coords} pathOptions={{ color: r.color, weight: 3, opacity }} />
+                <Polyline key={r.routeId} positions={r.coords} pathOptions={{ color: "#FF9800", weight: 3, opacity }} />
               ))
             ))}
             {/* Vehicles */}
@@ -408,6 +436,33 @@ export default function EmergencyOps() {
 
           {/* Details panel */}
           <div className="emg-details">
+            {/* Manual TLS Override quick access */}
+            <div className="emg-tls-box" style={{ marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Manual TLS Override</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <label style={{ fontSize: 12 }}>
+                  <input type="checkbox" checked={showTls} onChange={(e)=>setShowTls(e.target.checked)} /> Show TLS markers
+                </label>
+                <select
+                  value={tlsTargetId}
+                  onChange={(e)=>setTlsTargetId(e.target.value)}
+                  style={{ padding: "6px 8px", border: "1px solid #ddd", borderRadius: 4, minWidth: 140 }}
+                >
+                  <option value="">Select TLS…</option>
+                  {Array.isArray(net.tls) && net.tls.map((t)=>(
+                    <option key={t.id} value={t.id}>{t.id}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => { if (tlsTargetId) setTlsModalOpen(true); }}
+                  disabled={!tlsTargetId}
+                  className="action-btn"
+                  style={{ padding: "6px 10px", background: tlsTargetId?"#1976D2":"#9CA3AF", color: "#fff", border: "none", borderRadius: 4 }}
+                >
+                  Open Controls
+                </button>
+              </div>
+            </div>
             {selected ? (
               <div>
                 <div className="emg-details-title">
@@ -438,6 +493,17 @@ export default function EmergencyOps() {
           </div>
         </div>
       </div>
+
+      {/* TLS Modal */}
+      {tlsModalOpen && tlsTargetId && (
+        <TrafficLightModal
+          tlsId={tlsTargetId}
+          isOpen={tlsModalOpen}
+          onClose={() => setTlsModalOpen(false)}
+          timing={{}}
+          program={{}}
+        />
+      )}
 
       {debug && (
         <div style={{ position:"fixed", right: 12, bottom: 12, display:"flex", gap:8, zIndex: 10000 }}>
