@@ -258,27 +258,23 @@
   color: white;
   font-weight: 600;
   border: none;
-  padding: 6px 14px;
+  padding: 6px 30px 6px 14px;
   border-radius: 20px;
   text-transform: uppercase;
   cursor: pointer;
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
-}
-
-.role-select:focus {
-  outline: 2px solid rgba(255,255,255,0.2);
-}
-
-/* Add white chevron icon to the right of the role select */
-.role-select {
+  font-size: 12px;
+  transition: all 0.2s ease;
   background-image: url("data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Cpolyline%20points='6%209%2012%2015%2018%209'%20stroke='white'%20stroke-width='2'%20fill='none'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   background-size: 12px 12px;
-  /* ensure text doesn't overlap the icon */
-  padding-right: 36px;
+}
+
+.role-select:focus {
+  outline: 2px solid rgba(255,255,255,0.2);
 }
 
 .status-badge {
@@ -292,15 +288,17 @@
 }
 
 .status-active {
-  background-color: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
+  background-color: #22c55e;
+  color: #ffffff;
+  border: 1px solid #16a34a;
+  font-weight: 600;
 }
 
 .status-inactive {
-  background-color: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
+  background-color: #ef4444;
+  color: #ffffff;
+  border: 1px solid #dc2626;
+  font-weight: 600;
 }
 
 .no-data {
@@ -424,4 +422,37 @@
   cursor: not-allowed;
   box-shadow: none;
   transform: none;
+}
+
+/* Action Select Dropdown Styling */
+.action-select {
+  padding: 6px 6px 6px 14px;
+  padding-right: 20px !important;
+  border: 2px solid #4b5563;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #d1d5db;
+  background-color: #374151;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Cpolyline%20points='6%209%2012%2015%2018%209'%20stroke='%23d1d5db'%20stroke-width='2'%20fill='none'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: calc(100% - 4px) center;
+  background-size: 10px 10px;
+}
+
+.action-select:hover {
+  border-color: #4a6cf7;
+  background-color: #4b5563;
+  color: #ffffff;
+}
+
+.action-select:focus {
+  outline: none;
+  border-color: #4a6cf7;
+  box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.25);
 }
