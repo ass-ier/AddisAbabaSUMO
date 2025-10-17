@@ -1577,73 +1577,121 @@ const TrafficMap = () => {
             </div>
           </div>
           <div className="legend" style={{ marginTop: 12 }}>
-            <div
-              className="legend-title"
-              style={{ fontWeight: "bold", marginBottom: 8 }}
-            >
-              Traffic Density Legend
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
-              <div className="legend-item">
+            {heatEnabled ? (
+              <>
                 <div
-                  className="legend-color"
-                  style={{
-                    background: "#4CAF50",
-                    width: "20px",
-                    height: "4px",
-                    borderRadius: "2px",
-                    opacity: "0.7",
-                  }}
-                ></div>
-                <span>Open Roads (No vehicles)</span>
-              </div>
-              <div className="legend-item">
+                  className="legend-title"
+                  style={{ fontWeight: "bold", marginBottom: 8 }}
+                >
+                  Heatmap Legend
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
+                  <div className="legend-item">
+                    <div
+                      className="legend-swatch"
+                      style={{
+                        background: "#00C800",
+                        width: "18px",
+                        height: "12px",
+                        borderRadius: "2px",
+                      }}
+                    ></div>
+                    <span>Light traffic</span>
+                  </div>
+                  <div className="legend-item">
+                    <div
+                      className="legend-swatch"
+                      style={{
+                        background: "#FFA500",
+                        width: "18px",
+                        height: "12px",
+                        borderRadius: "2px",
+                      }}
+                    ></div>
+                    <span>Mild traffic</span>
+                  </div>
+                  <div className="legend-item">
+                    <div
+                      className="legend-swatch"
+                      style={{
+                        background: "#DC0000",
+                        width: "18px",
+                        height: "12px",
+                        borderRadius: "2px",
+                      }}
+                    ></div>
+                    <span>Heavy traffic</span>
+                  </div>
+                </div>
                 <div
-                  className="legend-color"
+                  className="legend-note"
                   style={{
-                    background: "#4CAF50",
-                    width: "20px",
-                    height: "4px",
-                    borderRadius: "2px",
+                    fontSize: "12px",
+                    marginTop: "8px",
+                    fontStyle: "italic",
                   }}
-                ></div>
-                <span>Light Traffic (1-2 vehicles)</span>
-              </div>
-              <div className="legend-item">
+                >
+                  * Colors reflect congestion intensity from speed-based heatmap
+                </div>
+              </>
+            ) : (
+              <>
                 <div
-                  className="legend-color"
-                  style={{
-                    background: "#FFC107",
-                    width: "20px",
-                    height: "4px",
-                    borderRadius: "2px",
-                  }}
-                ></div>
-                <span>Moderate Traffic (3-5 vehicles)</span>
-              </div>
-              <div className="legend-item">
+                  className="legend-title"
+                  style={{ fontWeight: "bold", marginBottom: 8 }}
+                >
+                  Traffic Density Legend
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
+                  <div className="legend-item">
+                    <div
+                      className="legend-swatch"
+                      style={{
+                        background: "#4CAF50",
+                        width: "18px",
+                        height: "12px",
+                        borderRadius: "2px",
+                      }}
+                    ></div>
+                    <span>Light traffic (1-2 vehicles)</span>
+                  </div>
+                  <div className="legend-item">
+                    <div
+                      className="legend-swatch"
+                      style={{
+                        background: "#FFC107",
+                        width: "18px",
+                        height: "12px",
+                        borderRadius: "2px",
+                      }}
+                    ></div>
+                    <span>Mild traffic (3-5 vehicles)</span>
+                  </div>
+                  <div className="legend-item">
+                    <div
+                      className="legend-swatch"
+                      style={{
+                        background: "#F44336",
+                        width: "18px",
+                        height: "12px",
+                        borderRadius: "2px",
+                      }}
+                    ></div>
+                    <span>Heavy traffic (6+ vehicles)</span>
+                  </div>
+                </div>
                 <div
-                  className="legend-color"
+                  className="legend-note"
                   style={{
-                    background: "#F44336",
-                    width: "20px",
-                    height: "4px",
-                    borderRadius: "2px",
+                    fontSize: "12px",
+                    marginTop: "8px",
+                    fontStyle: "italic",
                   }}
-                ></div>
-                <span>Heavy Traffic (6+ vehicles)</span>
-              </div>
-            </div>
-            <div
-              className="legend-note"
-              style={{
-                fontSize: "12px",
-                marginTop: "8px",
-                fontStyle: "italic",
-              }}
-            >
-              * Colors change based on real-time vehicle count per road segment
-            </div>
+                >
+                  * Colors change based on real-time vehicle count per road segment
+                </div>
+              </>
+            )}
             <div
               className="legend-title"
               style={{
