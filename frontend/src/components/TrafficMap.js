@@ -1142,40 +1142,9 @@ const TrafficMap = () => {
           </span>
         </div>
         <div className="kpi">
-          <span className="kpi-label">Emergency Units</span>
-          <span className="kpi-value" style={{ color: "#E53935" }}>
-            {Array.isArray(mapData?.vehicles)
-              ? mapData.vehicles.filter(
-                  (v) =>
-                    v.type === "ambulance" ||
-                    v.type === "fire_truck" ||
-                    v.type === "police"
-                ).length
-              : 0}
-          </span>
-        </div>
-        <div className="kpi">
-          <span className="kpi-label">Traffic Status</span>
-          <span
-            className="kpi-value"
-            style={{
-              color:
-                (edgeCongestion?.size || 0) > 0
-                  ? congestedClasses.red.length > 0
-                    ? "#F44336"
-                    : congestedClasses.yellow.length > 0
-                      ? "#FFC107"
-                      : "#4CAF50"
-                  : "#4CAF50",
-            }}
-          >
-            {(edgeCongestion?.size || 0) === 0
-              ? "All Clear"
-              : congestedClasses.red.length > 0
-                ? "Congested"
-                : congestedClasses.yellow.length > 0
-                  ? "Moderate"
-                  : "Free Flow"}
+          <span className="kpi-label">Traffic Lights</span>
+          <span className="kpi-value" style={{ color: "#9C27B0" }}>
+            {Array.isArray(mapData?.tls) ? mapData.tls.length : 0}
           </span>
         </div>
       </div>
@@ -1545,227 +1514,54 @@ const TrafficMap = () => {
       {/* Bottom Info (Traffic Summary + Legend) */}
       <div style={{ width: "100%", marginTop: 12 }}>
         <div className="card shadow-card" style={{ padding: 12 }}>
-          <div className="summary-stats">
-            <div className="stat-item">
-              <span className="stat-label">Road Segments:</span>
-              <span className="stat-value">{edgeGeoms.length}</span>
-            </div>
-            <div className="stat-item">
-              <span className="stat-label">With Traffic Data:</span>
-              <span className="stat-value" style={{ color: "#1976D2" }}>
-                {edgeCongestion?.size || 0}
-              </span>
-            </div>
-            <div className="stat-item">
-              <span className="stat-label">Free Flowing:</span>
-              <span className="stat-value" style={{ color: "#4CAF50" }}>
-                {congestedClasses.green.length +
-                  congestedClasses.default.length}
-              </span>
-            </div>
-            <div className="stat-item">
-              <span className="stat-label">Congested:</span>
-              <span className="stat-value" style={{ color: "#F44336" }}>
-                {congestedClasses.red.length}
-              </span>
-            </div>
-            <div className="stat-item">
-              <span className="stat-label">Traffic Lights:</span>
-              <span className="stat-value" style={{ color: "#9C27B0" }}>
-                {Array.isArray(mapData?.tls) ? mapData.tls.length : 0}
-              </span>
-            </div>
-          </div>
           <div className="legend" style={{ marginTop: 12 }}>
-            {heatEnabled ? (
-              <>
-                <div
-                  className="legend-title"
-                  style={{ fontWeight: "bold", marginBottom: 8 }}
-                >
-                  Heatmap Legend
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
-                  <div className="legend-item">
-                    <div
-                      className="legend-swatch"
-                      style={{
-                        background: "#00C800",
-                        width: "18px",
-                        height: "12px",
-                        borderRadius: "2px",
-                      }}
-                    ></div>
-                    <span>Light traffic</span>
-                  </div>
-                  <div className="legend-item">
-                    <div
-                      className="legend-swatch"
-                      style={{
-                        background: "#FFA500",
-                        width: "18px",
-                        height: "12px",
-                        borderRadius: "2px",
-                      }}
-                    ></div>
-                    <span>Mild traffic</span>
-                  </div>
-                  <div className="legend-item">
-                    <div
-                      className="legend-swatch"
-                      style={{
-                        background: "#DC0000",
-                        width: "18px",
-                        height: "12px",
-                        borderRadius: "2px",
-                      }}
-                    ></div>
-                    <span>Heavy traffic</span>
-                  </div>
-                </div>
-                <div
-                  className="legend-note"
-                  style={{
-                    fontSize: "12px",
-                    marginTop: "8px",
-                    fontStyle: "italic",
-                  }}
-                >
-                  * Colors reflect congestion intensity from speed-based heatmap
-                </div>
-              </>
-            ) : (
-              <>
-                <div
-                  className="legend-title"
-                  style={{ fontWeight: "bold", marginBottom: 8 }}
-                >
-                  Traffic Density Legend
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
-                  <div className="legend-item">
-                    <div
-                      className="legend-swatch"
-                      style={{
-                        background: "#4CAF50",
-                        width: "18px",
-                        height: "12px",
-                        borderRadius: "2px",
-                      }}
-                    ></div>
-                    <span>Light traffic (1-2 vehicles)</span>
-                  </div>
-                  <div className="legend-item">
-                    <div
-                      className="legend-swatch"
-                      style={{
-                        background: "#FFC107",
-                        width: "18px",
-                        height: "12px",
-                        borderRadius: "2px",
-                      }}
-                    ></div>
-                    <span>Mild traffic (3-5 vehicles)</span>
-                  </div>
-                  <div className="legend-item">
-                    <div
-                      className="legend-swatch"
-                      style={{
-                        background: "#F44336",
-                        width: "18px",
-                        height: "12px",
-                        borderRadius: "2px",
-                      }}
-                    ></div>
-                    <span>Heavy traffic (6+ vehicles)</span>
-                  </div>
-                </div>
-                <div
-                  className="legend-note"
-                  style={{
-                    fontSize: "12px",
-                    marginTop: "8px",
-                    fontStyle: "italic",
-                  }}
-                >
-                  * Colors change based on real-time vehicle count per road segment
-                </div>
-              </>
-            )}
             <div
               className="legend-title"
-              style={{
-                fontWeight: "bold",
-                marginTop: 16,
-                marginBottom: 8,
-              }}
+              style={{ fontWeight: "bold", marginBottom: 8 }}
             >
-              Emergency Vehicles
+              Traffic Density Legend
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
-              <div className="legend-item" style={{ alignItems: "center" }}>
+              <div className="legend-item">
                 <div
+                  className="legend-swatch"
                   style={{
-                    width: "24px",
-                    height: "24px",
-                    background: "#FFFFFF",
-                    border: "2px solid #E53935",
-                    borderRadius: "4px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "12px",
-                    fontWeight: "bold",
+                    background: "#4CAF50",
+                    width: "18px",
+                    height: "12px",
+                    borderRadius: "2px",
                   }}
-                >
-                  AMB
-                </div>
-                <span>Ambulance</span>
+                ></div>
+                <span>Light traffic (1-2 vehicles)</span>
               </div>
-              <div className="legend-item" style={{ alignItems: "center" }}>
+              <div className="legend-item">
                 <div
+                  className="legend-swatch"
                   style={{
-                    width: "24px",
-                    height: "24px",
-                    background: "#B71C1C",
-                    border: "2px solid #FFEB3B",
-                    borderRadius: "4px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "10px",
-                    fontWeight: "bold",
-                    color: "white",
+                    background: "#FFC107",
+                    width: "18px",
+                    height: "12px",
+                    borderRadius: "2px",
                   }}
-                >
-                  FIRE
-                </div>
-                <span>Fire Truck</span>
+                ></div>
+                <span>Mild traffic (3-5 vehicles)</span>
               </div>
-              <div className="legend-item" style={{ alignItems: "center" }}>
+              <div className="legend-item">
                 <div
+                  className="legend-swatch"
                   style={{
-                    width: "24px",
-                    height: "24px",
-                    background: "#1565C0",
-                    border: "2px solid #FFFFFF",
-                    borderRadius: "4px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "12px",
-                    fontWeight: "bold",
-                    color: "white",
+                    background: "#F44336",
+                    width: "18px",
+                    height: "12px",
+                    borderRadius: "2px",
                   }}
-                >
-                  POL
-                </div>
-                <span>Police</span>
+                ></div>
+                <span>Heavy traffic (6+ vehicles)</span>
               </div>
             </div>
           </div>
+          </div>
         </div>
-      </div>
 
       {/* Traffic Light Control Modal */}
       {selectedTlsId && (
