@@ -217,19 +217,7 @@ const Navigation = () => {
                 </span>
                 <span className="link-text">Activity Log</span>
               </Link>
-              <Link
-                to="/operator/users"
-                className={`sidebar-link ${
-                  isActive("/operator/users") ? "active" : ""
-                }`}
-                onClick={closeMenu}
-                title="Team Directory"
-              >
-                <span className="link-icon">
-                  <UsersIcon className="w-5 h-5" />
-                </span>
-                <span className="link-text">Team</span>
-              </Link>
+              {/* Operator Team link removed */}
             </>
           )}
 
