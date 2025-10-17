@@ -227,7 +227,6 @@ def main():
                     # current position
                     px, py = traci.vehicle.getPosition(vid)
                     coords = []
-                    coords.append([float(px), float(py)])
 
                     # Try primary: full route edge sequence
                     edge_ids = []
@@ -251,28 +250,86 @@ def main():
                     prev_lane = current_lane
 
                     for idx, eid in enumerate(edge_ids):
-                        lane_id = None
-                        # Use current lane for the first edge, otherwise default to lane 0
-                        if idx == 0 and prev_lane and str(prev_lane).startswith(str(eid)+"_"):
-                            lane_id = prev_lane
-                        else:
-                            # pick rightmost/default lane 0
+                        # First edge: choose the lane whose shape is closest to the current position,
+                        # and start from the nearest point along that lane to avoid any straight jump.
+                        if idx == 0:
+                            # Build candidate lane list (prefer current lane if it belongs to this edge)
+                            candidates = []
                             try:
-                                lane_id = f"{eid}_0"
+                                lane_count = int(traci.edge.getLaneNumber(eid))
                             except Exception:
-                                lane_id = None
+                                lane_count = 0
+                            if prev_lane and str(prev_lane).startswith(str(eid)+"_"):
+                                candidates.append(prev_lane)
+                            for li in range(max(0, lane_count)):
+                                lid = f"{eid}_{li}"
+                                if lid != prev_lane:
+                                    candidates.append(lid)
 
-                        # Append lane shape
+                            best_lid = None
+                            best_shape = None
+                            best_idx = 0
+                            best_d2 = float('inf')
+                            for lid in candidates:
+                                try:
+                                    shp = traci.lane.getShape(lid)
+                                    for i, (sx, sy) in enumerate(shp):
+                                        dx = float(sx) - float(px)
+                                        dy = float(sy) - float(py)
+                                        d2 = dx*dx + dy*dy
+                                        if d2 < best_d2:
+                                            best_d2 = d2
+                                            best_lid = lid
+                                            best_shape = shp
+                                            best_idx = i
+                                except Exception:
+                                    continue
+
+                            # If we found a suitable lane shape, append from the nearest vertex onward
+                            if best_shape:
+                                for i in range(best_idx, len(best_shape)):
+                                    sx, sy = best_shape[i]
+                                    if coords and coords[-1][0] == float(sx) and coords[-1][1] == float(sy):
+                                        continue
+                                    coords.append([float(sx), float(sy)])
+                                continue  # done with first edge
+                            # If no lane shape, fall back to edge shape
+                            try:
+                                shp = traci.edge.getShape(eid)
+                                # Find nearest index on edge shape
+                                nearest_idx = 0
+                                nearest_d2 = float('inf')
+                                for i, (sx, sy) in enumerate(shp):
+                                    dx = float(sx) - float(px)
+                                    dy = float(sy) - float(py)
+                                    d2 = dx*dx + dy*dy
+                                    if d2 < nearest_d2:
+                                        nearest_d2 = d2
+                                        nearest_idx = i
+                                for i in range(nearest_idx, len(shp)):
+                                    sx, sy = shp[i]
+                                    if coords and coords[-1][0] == float(sx) and coords[-1][1] == float(sy):
+                                        continue
+                                    coords.append([float(sx), float(sy)])
+                                continue
+                            except Exception:
+                                # couldn't get shapes; fall through to generic handling (will be caught by fallback)
+                                pass
+
+                        # Subsequent edges: use lane 0 centerline when available (smooth overlay)
+                        lane_id = None
+                        try:
+                            lane_id = f"{eid}_0"
+                        except Exception:
+                            lane_id = None
                         try:
                             if lane_id:
                                 shp = traci.lane.getShape(lane_id)
                                 for sx, sy in shp:
-                                    # Avoid duplicating last point
                                     if coords and coords[-1][0] == float(sx) and coords[-1][1] == float(sy):
                                         continue
                                     coords.append([float(sx), float(sy)])
                         except Exception:
-                            # Fallback to edge shape if lane shape unavailable
                             try:
                                 shp = traci.edge.getShape(eid)
                                 for sx, sy in shp:
@@ -302,7 +359,13 @@ def main():
                         # project 5 meters ahead in heading (SUMO angle 0=east, 90=north)
                         import math
                         rad = math.radians(ang)
-                        coords.append([float(px + 5.0 * math.cos(rad)), float(py + 5.0 * math.sin(rad))])
+                        if len(coords) == 0:
+                            coords.append([float(px), float(py)])
+                            coords.append([float(px + 5.0 * math.cos(rad)), float(py + 5.0 * math.sin(rad))])
+                        elif len(coords) == 1:
+                            # extend from the single point
+                            lastx, lasty = coords[-1]
+                            coords.append([float(lastx + 5.0 * math.cos(rad)), float(lasty + 5.0 * math.sin(rad))])
 
                     origin = { 'x': float(coords[0][0]), 'y': float(coords[0][1]) }
                     dest = { 'x': float(coords[-1][0]), 'y': float(coords[-1][1]) }

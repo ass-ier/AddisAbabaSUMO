@@ -89,6 +89,8 @@ export default function EmergencyOps() {
   const [vehicles, setVehicles] = useState(new Map()); // vehicleId -> rec
   const [routes, setRoutes] = useState(new Map()); // routeId -> rec
   const [selectedId, setSelectedId] = useState(null);
+  const selectedRef = useRef(null);
+  const pendingRouteRef = useRef(null);
 
   // Load SUMO geometry for context (CRS.Simple)
   useEffect(() => {
@@ -99,6 +101,9 @@ export default function EmergencyOps() {
     }).catch(() => {});
     return () => { ok = false; };
   }, []);
+
+  // Keep a live ref of the current selection for event handlers
+  useEffect(() => { selectedRef.current = selectedId; }, [selectedId]);
 
   // Connect emergency feed (register handlers immediately so debug injection works without a socket)
   useEffect(() => {
@@ -133,28 +138,51 @@ export default function EmergencyOps() {
       if (!mounted || !frame) return;
       const ts = frame.timestamp || Date.now();
       const list = Array.isArray(frame.routes) ? frame.routes : [frame];
-        setRoutes((prev) => {
-          const m = new Map(prev);
-          for (const r of list) {
-            if (!r || !r.routeId || !Array.isArray(r.coords)) continue;
-            m.set(r.routeId, {
-              routeId: r.routeId,
-              coords: r.coords.map((p) => [p[1] ?? p.y, p[0] ?? p.x]), // [[y,x]] -> [lat, lng]
-              origin: r.origin, destination: r.destination,
-              eta: r.eta, assignedVehicleId: r.assignedVehicleId,
-              color: colorForId(r.routeId), lastTs: ts,
-            });
-          }
-          try {
-            // Expose for zoom fallback
-            window.__emgRoutes = Object.fromEntries(Array.from(m.entries()).map(([k,v])=>[k,{ coords: v.coords }]));
-          } catch(_) {}
-          return m;
-        });
+
+      // If a vehicle is selected, only accept the route for that vehicle
+      const selId = selectedRef.current;
+      const filtered = selId
+        ? list.filter((r) => (r?.assignedVehicleId || r?.vehicleId) === selId)
+        : list;
+
+      setRoutes((prev) => {
+        // If we have a selection, replace routes with only the selected vehicle's route(s)
+        const m = selId ? new Map() : new Map(prev);
+        for (const r of filtered) {
+          if (!r || !r.routeId || !Array.isArray(r.coords)) continue;
+          m.set(r.routeId, {
+            routeId: r.routeId,
+            coords: r.coords.map((p) => [p[1] ?? p.y, p[0] ?? p.x]), // [[y,x]] -> [lat, lng]
+            origin: r.origin, destination: r.destination,
+            eta: r.eta, assignedVehicleId: r.assignedVehicleId || r.vehicleId,
+            color: colorForId(r.routeId), lastTs: ts,
+          });
+        }
+        try {
+          // Expose for zoom fallback
+          window.__emgRoutes = Object.fromEntries(Array.from(m.entries()).map(([k,v])=>[k,{ coords: v.coords }]));
+        } catch(_) {}
+        return m;
+      });
     });
 
     // attempt connection (non-blocking for debug injection)
     emergencyFeed.connect().catch(() => {});
+
+    // when socket connects, send any pending route request (or current selection)
+    const offConn = emergencyFeed.on("connected", () => {
+      const pending = pendingRouteRef.current;
+      const selId = selectedRef.current;
+      if (pending?.vehicleId) {
+        try { emergencyFeed.requestRoute(pending); } catch(_) {}
+        pendingRouteRef.current = null;
+      } else if (selId) {
+        const v = vehicles.get(selId);
+        if (v) {
+          try { emergencyFeed.requestRoute({ vehicleId: v.vehicleId, routeId: v.routeId }); } catch(_) {}
+        }
+      }
+    });
 
     // initial snapshot (optional; call only if explicitly enabled to avoid 404 noise)
     if (String(process.env.REACT_APP_ENABLE_EMERGENCY_SNAPSHOT || "false").toLowerCase() === "true") {
@@ -194,7 +222,7 @@ export default function EmergencyOps() {
       });
     }
 
-    return () => { mounted = false; offV?.(); offR?.(); emergencyFeed.disconnect(); };
+    return () => { mounted = false; offV?.(); offR?.(); offConn?.(); emergencyFeed.disconnect(); };
   }, []);
 
   // Derived lists and counts
@@ -212,8 +240,20 @@ export default function EmergencyOps() {
   useEffect(() => {
     if (!selected) return;
     const rid = selected.routeId;
-    // Always request route for selected vehicle; backend may resolve by vehicleId if routeId is absent
-    try { emergencyFeed.requestRoute({ vehicleId: selected.vehicleId, routeId: rid }); } catch(_) {}
+    const vehicleId = selected.vehicleId;
+    // If socket not connected yet, queue the request and fire on connect
+    if (!emergencyFeed.connected) {
+      pendingRouteRef.current = { vehicleId, routeId: rid };
+    } else {
+      try { emergencyFeed.requestRoute({ vehicleId, routeId: rid }); } catch(_) {}
+    }
+    // One-shot retry shortly after selection in case the first emit happened during handshake
+    const t = setTimeout(() => {
+      if (vehicleId) {
+        try { emergencyFeed.requestRoute({ vehicleId, routeId: rid }); } catch(_) {}
+      }
+    }, 600);
+    return () => clearTimeout(t);
   }, [selected]);
 
   // Compute route progress split (traversed vs remaining) for the selected vehicle
@@ -420,6 +460,17 @@ export default function EmergencyOps() {
 
   function handleSelect(id) {
     setSelectedId(id);
+    // Clear any previous route overlay immediately when switching selection
+    setRoutes(new Map());
+    // Immediately request new route for the selected vehicle (best-effort)
+    const v = vehicles.get(id);
+    if (v) {
+      if (!emergencyFeed.connected) {
+        pendingRouteRef.current = { vehicleId: v.vehicleId, routeId: v.routeId };
+      } else {
+        try { emergencyFeed.requestRoute({ vehicleId: v.vehicleId, routeId: v.routeId }); } catch(_) {}
+      }
+    }
   }
   function filterList(q) {
     const s = String(q || "").trim().toLowerCase();
