@@ -277,6 +277,15 @@
   background-clip: text;
 }
 
+/* Two-line Cluster ID styling to reduce horizontal scroll */
+.cluster-id {
+  display: inline-block;
+  max-width: 180px;
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.1;
+}
+
 @media (max-width: 768px) {
   .filter-form {
     grid-template-columns: 1fr;

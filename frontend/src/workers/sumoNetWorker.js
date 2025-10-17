@@ -162,10 +162,11 @@ async function parseXmlInWorker(url) {
   const tls = jTls
     .map((jn) => {
       const id = jn.getAttribute("id") || "";
+      const clusterId = jn.getAttribute("tl") || id; // SUMO joined-TLS id
       const x = parseFloat(jn.getAttribute("x"));
       const y = parseFloat(jn.getAttribute("y"));
       if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-      return { id, lat: y, lng: x };
+      return { id, clusterId, lat: y, lng: x };
     })
     .filter(Boolean);
 

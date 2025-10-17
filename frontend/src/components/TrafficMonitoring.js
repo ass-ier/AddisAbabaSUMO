@@ -5,14 +5,21 @@ import PageLayout from "./PageLayout";
 import { api, BASE_API } from "../utils/api";
 import LiveIntersectionMap from "./LiveIntersectionMap";
 import TrafficLightModal from "./TrafficLightModal";
+import { parseSumoNetXml } from "../utils/sumoNetParser";
 
 const TrafficMonitoring = () => {
   const [trafficData, setTrafficData] = useState([]); // raw or aggregated depending on mode
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    intersectionId: "",
-    startDate: "",
-    endDate: "",
+  const [filters, setFilters] = useState(() => {
+    // Default to last 7 days to show seeded data
+    const end = new Date();
+    const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const toLocal = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    return {
+      intersectionId: "",
+      startDate: toLocal(start),
+      endDate: toLocal(end),
+    };
   });
   const [intervalMinutes] = useState(30);
   const [liveRequested, setLiveRequested] = useState(false);
@@ -20,6 +27,8 @@ const TrafficMonitoring = () => {
   const [statusMsg, setStatusMsg] = useState("");
   const [liveStats, setLiveStats] = useState({ visibleVehicles: 0, avgSpeedMs: 0 });
   const [tlsModal, setTlsModal] = useState({ open: false, id: null, timing: {}, program: {}, currentPhase: null });
+  const [clusterIds, setClusterIds] = useState([]);
+  const [tlsByJunction, setTlsByJunction] = useState({}); // junctionId -> clusterId
   const socketRef = useRef(null);
   const statusPollRef = useRef(null);
   const liveBucketsRef = useRef(new Map());
@@ -30,6 +39,24 @@ const TrafficMonitoring = () => {
     const size = intervalMinutes * 60 * 1000;
     const start = Math.floor(msec / size) * size;
     return new Date(start);
+  };
+
+  // Render long cluster IDs on two lines to reduce horizontal scroll
+  const renderTwoLineId = (val) => {
+    const s = String(val || "");
+    if (!s) return "";
+    const mid = Math.floor(s.length / 2);
+    // Try to break near an underscore close to the middle
+    let br = s.lastIndexOf("_", mid);
+    if (br < Math.floor(s.length * 0.3)) br = s.indexOf("_", mid);
+    if (br === -1) br = mid;
+    return (
+      <>
+        {s.slice(0, br)}
+        <br />
+        {s.slice(br)}
+      </>
+    );
   };
 
   const normalizeFlows = (flows = {}, direction, count = 0) => {
@@ -78,6 +105,10 @@ const TrafficMonitoring = () => {
       if (r.waitingTime != null) {
         g.waitingTimeTotal += Number(r.waitingTime) || 0;
         g.waitingTimeSamples += 1;
+      } else if (r.avgWaitingTime != null) {
+        // Support pre-aggregated rows seeded in DB
+        g.waitingTimeTotal += Number(r.avgWaitingTime) || 0;
+        g.waitingTimeSamples += 1;
       }
       // Merge flows
       const merged = normalizeFlows(r.flows, r.direction, vc);
@@ -97,6 +128,7 @@ const TrafficMonitoring = () => {
     try {
       setLoading(true);
       const params = {
+        // Backend expects intersectionId; we store clusterId in that field
         intersectionId: filters.intersectionId || undefined,
         startDate: filters.startDate || undefined,
         endDate: filters.endDate || undefined,
@@ -105,8 +137,15 @@ const TrafficMonitoring = () => {
       // Fetch raw records; aggregate client-side for 30-minute buckets
       const data = await api.getTrafficData(params);
       const processed = Array.isArray(data) ? data : data?.items || [];
-      const finalData = aggregateByInterval(processed);
-      setTrafficData(finalData);
+      const finalData = aggregateByInterval(processed).map((d) => {
+        const cid = d.clusterId || d.tls_id || tlsByJunction[d.intersectionId] || d.intersectionId;
+        return { ...d, clusterId: cid };
+      });
+      // If a specific cluster filter is set, enforce it client-side as well
+      const filtered = filters.intersectionId
+        ? finalData.filter((d) => (d.clusterId || d.intersectionId) === filters.intersectionId)
+        : finalData;
+      setTrafficData(filtered);
       setStatusMsg("");
     } catch (error) {
       console.error("Error fetching traffic data:", error);
@@ -120,6 +159,24 @@ const TrafficMonitoring = () => {
       fetchTrafficData();
     }
   }, [filters, fetchTrafficData, liveRequested]);
+
+  // Load TLS cluster IDs from SUMO net to power the Cluster ID selector
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const net = await parseSumoNetXml("/Sumoconfigs/AddisAbaba.net.xml");
+        const tls = Array.isArray(net?.tls) ? net.tls : [];
+        const ids = Array.from(new Set(tls.map(t => t.clusterId || t.id))).sort();
+        const map = {};
+        tls.forEach(t => { if (t?.id) map[t.id] = t.clusterId || t.id; });
+        if (!cancelled) { setClusterIds(ids); setTlsByJunction(map); }
+      } catch (_) {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Monitor SUMO status only when live is requested
   useEffect(() => {
@@ -174,17 +231,20 @@ const TrafficMonitoring = () => {
     socketRef.current = io(BASE_API, { transports: ["websocket"] });
     socketRef.current.on("trafficData", (data) => {
       // Optional filter by intersection
-      if (filters.intersectionId && data.intersectionId && data.intersectionId !== filters.intersectionId) {
-        return;
+      if (filters.intersectionId) {
+        const did = data.intersectionId || data.tls_id || data.clusterId || data.id;
+        if (did && did !== filters.intersectionId) return;
       }
       // Bucketize
       const ts = data.timestamp || Date.now();
       const b = bucketStart(ts);
-      const key = `${data.intersectionId || data.tls_id || "unknown"}|${b.toISOString()}`;
+      const cid = data.clusterId || data.tls_id || tlsByJunction[data.intersectionId] || data.intersectionId || "unknown";
+      const key = `${cid}|${b.toISOString()}`;
       const existing = liveBucketsRef.current.get(key) || {
         bucketStart: b.toISOString(),
         bucketEnd: new Date(b.getTime() + intervalMinutes * 60 * 1000).toISOString(),
-        intersectionId: data.intersectionId || data.tls_id || "unknown",
+        intersectionId: cid,
+        clusterId: cid,
         vehicleCount: 0,
         throughput: 0,
         waitingTimeTotal: 0,
@@ -195,6 +255,7 @@ const TrafficMonitoring = () => {
       const merged = normalizeFlows(data.flows, data.direction, vc);
       const next = {
         ...existing,
+        clusterId: cid,
         vehicleCount: existing.vehicleCount + vc,
         throughput: existing.throughput + vc,
         waitingTimeTotal: existing.waitingTimeTotal + (Number(data.waitingTime) || 0),
@@ -248,7 +309,7 @@ const TrafficMonitoring = () => {
     const headers = [
       "bucketStart",
       "bucketEnd",
-      "intersectionId",
+      "clusterId",
       "vehicles",
       "throughput",
       "avgWaitingTime",
@@ -260,8 +321,8 @@ const TrafficMonitoring = () => {
     const rows = trafficData.map((d) => [
       d.bucketStart,
       d.bucketEnd,
-      d.intersectionId ?? "",
-      d.vehicleCount ?? 0,
+      d.clusterId ?? d.tls_id ?? d.intersectionId ?? "",
+      d.vehicles ?? d.vehicleCount ?? 0,
       d.throughput ?? d.vehicleCount ?? 0,
       Math.round((d.avgWaitingTime ?? 0) * 10) / 10,
       d.flows?.N ?? 0,
@@ -313,15 +374,21 @@ const TrafficMonitoring = () => {
       <div className="monitoring-controls">
         <form onSubmit={handleFilterSubmit} className="filter-form">
           <div className="filter-group">
-            <label htmlFor="intersectionId">Intersection ID:</label>
+            <label htmlFor="intersectionId">Cluster ID:</label>
             <input
               type="text"
               id="intersectionId"
               name="intersectionId"
               value={filters.intersectionId}
               onChange={handleFilterChange}
-              placeholder="Enter intersection ID"
+              placeholder="Enter cluster ID (TLS)"
+              list="clusterIdOptions"
             />
+            <datalist id="clusterIdOptions">
+              {clusterIds.map((id) => (
+                <option key={id} value={id} />
+              ))}
+            </datalist>
           </div>
 
           <div className="filter-group">
@@ -356,6 +423,19 @@ const TrafficMonitoring = () => {
               className="btn-secondary"
             >
               Clear
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                const end = new Date();
+                const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                const toLocal = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                setFilters((f) => ({ ...f, startDate: toLocal(start), endDate: toLocal(end) }));
+              }}
+              title="Set range to last 7 days"
+            >
+              Last 7 days
             </button>
             <label className="live-toggle">
               <input
@@ -422,7 +502,7 @@ const TrafficMonitoring = () => {
                 <thead>
                   <tr>
                     <th>Time Window</th>
-                    <th>Intersection ID</th>
+                    <th>Cluster ID</th>
                     <th>Flows (N/E/S/W)</th>
                     <th>Vehicles</th>
                     <th>Throughput</th>
@@ -437,7 +517,7 @@ const TrafficMonitoring = () => {
                           ? `${new Date(data.bucketStart).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - ${new Date(data.bucketEnd).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`
                           : ""}
                       </td>
-                      <td>{data.intersectionId}</td>
+                      <td><span className="cluster-id">{renderTwoLineId(data.clusterId || data.tls_id || data.intersectionId)}</span></td>
                       <td>{`${data.flows?.N ?? 0}/${data.flows?.E ?? 0}/${data.flows?.S ?? 0}/${data.flows?.W ?? 0}`}</td>
                       <td>{data.vehicleCount || 0}</td>
                       <td>{data.throughput ?? data.vehicleCount ?? 0}</td>
