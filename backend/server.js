@@ -360,6 +360,18 @@ const otpRoutes = require('./routes/otp');
 app.use('/api/otp', otpRoutes);
 
 // Health check endpoint
+// Emergency debug snapshot endpoint
+app.get('/api/emergency/snapshot', (req, res) => {
+  try {
+    const vehicles = Array.from(EMG_lastSeen.entries()).map(([vehicleId, p]) => ({ vehicleId, x: p.x, y: p.y, timestamp: p.t }));
+    const routes = Array.from(EMG_routes.values());
+    res.json({ vehicles, routes, ts: Date.now() });
+  } catch (e) {
+    res.status(500).json({ vehicles: [], routes: [], error: String(e?.message || e) });
+  }
+});
+
+// Health check endpoint
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
@@ -1494,6 +1506,36 @@ app.post("/api/sumo/control", authenticateToken, async (req, res) => {
                 // Broadcast visualization and also lightweight stats
                 if (payload.type === "viz") {
                   io.emit("viz", payload);
+                  try {
+                    if (Array.isArray(payload.vehicles)) {
+                      const ts = Date.now();
+                      const compact = [];
+                      for (const v of payload.vehicles) {
+                        const id = v.id || v.vehicleId;
+                        const x = typeof v.x === 'number' ? v.x : undefined;
+                        const y = typeof v.y === 'number' ? v.y : undefined;
+                        if (!id || x == null || y == null) continue;
+                        if (!EMG_firstSeen.has(id)) EMG_firstSeen.set(id, { x, y, t: ts });
+                        EMG_lastSeen.set(id, { x, y, t: ts });
+                        compact.push({ id, x, y, speed: v.speed });
+                      }
+                      if (compact.length) io.emit('vehicles', { timestamp: Date.now(), vehicles: compact });
+                    }
+                  } catch (_) {}
+                } else if (payload.type === 'route') {
+                  try {
+                    const rid = payload.routeId || (payload.vehicleId ? `R-${payload.vehicleId}` : undefined);
+                    const route = {
+                      routeId: rid,
+                      coords: Array.isArray(payload.coords) ? payload.coords : [],
+                      assignedVehicleId: payload.vehicleId,
+                      origin: payload.origin,
+                      destination: payload.destination,
+                    };
+                    io.emit('emergencyRoutes', { timestamp: Date.now(), routes: [route] });
+                  } catch (e) {
+                    console.warn('route relay failed', e?.message || e);
+                  }
 
                   // Periodic console-like log (every 50 steps)
                   if (typeof payload.step === "number") {
@@ -2310,12 +2352,60 @@ app.get(
   }
 );
 
+// In-memory emergency route helpers (non-destructive)
+const EMG_firstSeen = new Map(); // vehicleId -> { x, y, t }
+const EMG_lastSeen = new Map();  // vehicleId -> { x, y, t }
+const EMG_routes = new Map();    // routeId -> { routeId, coords, assignedVehicleId, eta, origin, destination }
+
 // Basic Socket.IO connection handling (always enabled)
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
+  });
+
+  // Emergency: provide a simple on-demand route based on first/last seen positions
+  socket.on('getEmergencyRoute', ({ vehicleId, routeId }) => {
+    try {
+      if (!vehicleId) return;
+      // Ask the Python bridge (TraCI) for the true route; non-blocking
+      try { sendBridgeCommand({ type: 'get_route', vehicleId }); } catch (_) {}
+      let start = EMG_firstSeen.get(vehicleId);
+      const curr = EMG_lastSeen.get(vehicleId);
+      // Fallback: if we haven't captured a first seen yet, seed it from current
+      if (!start && curr) { start = { ...curr }; EMG_firstSeen.set(vehicleId, start); }
+      if (!start || !curr) return;
+      const dx = Math.sign((curr.x - start.x) || 1);
+      const dy = Math.sign((curr.y - start.y) || 0);
+      const step = 1000; // meters ahead in SUMO coords
+      const dest = { x: curr.x + dx * step, y: curr.y + dy * step };
+      const coords = [
+        [start.x, start.y],
+        [start.x + (curr.x - start.x) * 0.25, start.y + (curr.y - start.y) * 0.25],
+        [start.x + (curr.x - start.x) * 0.5, start.y + (curr.y - start.y) * 0.5],
+        [curr.x, curr.y],
+        [curr.x + (dest.x - curr.x) * 0.5, curr.y + (dest.y - curr.y) * 0.5],
+        [dest.x, dest.y],
+      ];
+      const rid = routeId || `R-${vehicleId}`;
+      const route = {
+        routeId: rid,
+        coords,
+        assignedVehicleId: vehicleId,
+        eta: '—',
+        origin: { x: start.x, y: start.y },
+        destination: { x: dest.x, y: dest.y },
+        timestamp: Date.now(),
+      };
+      EMG_routes.set(rid, route);
+      const payload = { timestamp: Date.now(), routes: [route] };
+      // Emit to requester and broadcast for others (non-destructive)
+      try { socket.emit('emergencyRoutes', payload); } catch (_) {}
+      try { io.emit('emergencyRoutes', payload); } catch (_) {}
+    } catch (e) {
+      console.warn('getEmergencyRoute failed:', e.message);
+    }
   });
 
   // Send current simulation status to newly connected client

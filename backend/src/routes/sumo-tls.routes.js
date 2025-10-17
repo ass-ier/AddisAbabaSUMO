@@ -539,6 +539,9 @@ module.exports = function createSumoTlsRoutes(dependencies) {
                   });
                 } else if (payload.type === 'net') {
                   io.emit('sumoNet', payload);
+                } else if (payload.type === 'route') {
+                  // Relay emergency vehicle route to clients
+                  io.emit('emergencyRoutes', payload);
                 } else if (payload.type === 'error') {
                   const stackInfo = payload.stack ? `\nStack: ${payload.stack}` : '';
                   logger.error(`SUMO error: ${payload.message}${stackInfo}`);

@@ -221,6 +221,27 @@ io.on('connection', (socket) => {
     serverTime: new Date().toISOString(),
     availableStreams: ['dashboard', 'traffic', 'sumo', 'system', 'alerts']
   });
+
+  // Emergency route request -> forward to SUMO bridge
+  socket.on('getEmergencyRoute', (data) => {
+    try {
+      const vehicleId = data?.vehicleId || data?.id || data;
+      if (!vehicleId) {
+        socket.emit('emergencyRoutes', { error: 'vehicleId required' });
+        return;
+      }
+      if (!sumoSubprocess.getIsRunning()) {
+        socket.emit('emergencyRoutes', { vehicleId, error: 'SUMO bridge not running' });
+        return;
+      }
+      const ok = sumoSubprocess.sendCommand({ type: 'get_route', vehicleId });
+      if (!ok) {
+        socket.emit('emergencyRoutes', { vehicleId, error: 'Failed to send command' });
+      }
+    } catch (e) {
+      socket.emit('emergencyRoutes', { error: e.message });
+    }
+  });
 });
 
 // Real-time data broadcasting

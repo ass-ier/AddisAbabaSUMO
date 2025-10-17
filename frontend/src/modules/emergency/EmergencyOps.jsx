@@ -208,6 +208,35 @@ export default function EmergencyOps() {
     return routes.get(rid) || null;
   }, [selectedId, selected, routes]);
 
+  // If selected vehicle has a routeId but we don't have it cached, request it
+  useEffect(() => {
+    if (!selected) return;
+    const rid = selected.routeId;
+    // Always request route for selected vehicle; backend may resolve by vehicleId if routeId is absent
+    try { emergencyFeed.requestRoute({ vehicleId: selected.vehicleId, routeId: rid }); } catch(_) {}
+  }, [selected]);
+
+  // Compute route progress split (traversed vs remaining) for the selected vehicle
+  const routeProgress = useMemo(() => {
+    if (!selected || !selectedRoute || !Array.isArray(selectedRoute.coords)) return null;
+    const coords = selectedRoute.coords; // [ [lat, lng], ... ] in CRS.Simple
+    if (coords.length < 2) return null;
+    const vLat = Number.isFinite(selected.netLat) ? selected.netLat : selected.y;
+    const vLng = Number.isFinite(selected.netLng) ? selected.netLng : selected.x;
+    if (!Number.isFinite(vLat) || !Number.isFinite(vLng)) return null;
+    let bestIdx = 0, bestDist2 = Infinity, bestPoint = coords[0];
+    for (let i=0;i<coords.length;i++) {
+      const [lat,lng] = coords[i];
+      const dx = lng - vLng; // CRS.Simple: lng=x
+      const dy = lat - vLat; // lat=y
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bestDist2) { bestDist2 = d2; bestIdx = i; bestPoint = coords[i]; }
+    }
+    const traversed = coords.slice(0, Math.max(1, bestIdx+1));
+    const remaining = coords.slice(Math.max(0, bestIdx));
+    return { traversed, remaining, at: bestPoint, idx: bestIdx };
+  }, [selected, selectedRoute]);
+
   const visibleVehicles = useMemo(() => {
     return vehicleList.filter((v) => {
       const t = normalizeType(v.vehicleType);
@@ -289,11 +318,33 @@ export default function EmergencyOps() {
             )}
             {/* Base roads */}
             {net.lanes?.length>0 && (
-              <Polyline positions={net.lanes.map(l=>l.points)} pathOptions={{ color:"#9ea3a8", weight:6, opacity:0.85 }} />
+              <Polyline positions={net.lanes.map(l=>l.points)} pathOptions={{ color:"#4CAF50", weight:6, opacity:0.8 }} />
             )}
-            {/* Routes: show only selected route when a vehicle is selected; otherwise show all */}
+            {/* Routes: for selected vehicle, show Google-like progress (traversed vs remaining) */}
             {enabled && (selectedRoute ? (
-              <Polyline key={selectedRoute.routeId} positions={selectedRoute.coords} pathOptions={{ color: selectedRoute.color || "#00BCD4", weight: 6, opacity: Math.min(1, opacity+0.2) }} />
+              <>
+                {routeProgress?.traversed?.length > 1 && (
+                  <Polyline
+                    key={`${selectedRoute.routeId}_done`}
+                    positions={routeProgress.traversed}
+                    pathOptions={{ color: "#9e9e9e", weight: 6, opacity: 0.8 }}
+                  />
+                )}
+                {routeProgress?.remaining?.length > 1 && (
+                  <Polyline
+                    key={`${selectedRoute.routeId}_remaining`}
+                    positions={routeProgress.remaining}
+                    pathOptions={{ color: selectedRoute.color || "#00BCD4", weight: 7, opacity: Math.min(1, opacity+0.15) }}
+                  />
+                )}
+                {/* Origin/Destination markers (subtle) */}
+                {Array.isArray(selectedRoute.coords) && selectedRoute.coords.length >= 2 && (
+                  <>
+                    <CircleMarker center={selectedRoute.coords[0]} radius={5} pathOptions={{ color: "#2e7d32", fillColor: "#2e7d32", fillOpacity: 1, weight: 2 }} />
+                    <CircleMarker center={selectedRoute.coords[selectedRoute.coords.length-1]} radius={5} pathOptions={{ color: "#d32f2f", fillColor: "#d32f2f", fillOpacity: 1, weight: 2 }} />
+                  </>
+                )}
+              </>
             ) : (
               Array.from(routes.values()).map((r)=> (
                 <Polyline key={r.routeId} positions={r.coords} pathOptions={{ color: r.color, weight: 3, opacity }} />

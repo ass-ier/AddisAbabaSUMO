@@ -210,9 +210,114 @@ def main():
                 return
                 
             cmd_type = cmd.get('type')
-            if cmd_type not in ['tls', 'tls_state']:
+            # Supported command types
+            if cmd_type not in ['tls', 'tls_state', 'get_route']:
                 print(json.dumps({"type": "log", "level": "debug", "message": f"Command type is not supported: {cmd_type}"}))
                 sys.stdout.flush()
+                return
+
+            # Vehicle route fetch
+            if cmd_type == 'get_route':
+                try:
+                    vid = cmd.get('vehicleId') or cmd.get('id')
+                    if not vid:
+                        print(json.dumps({"type":"log","level":"warn","message":"get_route missing vehicleId"})); sys.stdout.flush(); return
+                    if vid not in traci.vehicle.getIDList():
+                        print(json.dumps({"type":"log","level":"warn","message":f"vehicle '{vid}' not in simulation"})); sys.stdout.flush(); return
+                    # current position
+                    px, py = traci.vehicle.getPosition(vid)
+                    coords = []
+                    coords.append([float(px), float(py)])
+
+                    # Try primary: full route edge sequence
+                    edge_ids = []
+                    try:
+                        edge_ids = list(traci.vehicle.getRoute(vid)) or []
+                    except Exception:
+                        edge_ids = []
+
+                    # Prefer lane centerline shapes for better overlay on lanes
+                    # Determine the starting lane from the vehicle when possible
+                    try:
+                        current_lane = traci.vehicle.getLaneID(vid)
+                    except Exception:
+                        current_lane = None
+
+                    first_edge = edge_ids[0] if edge_ids else None
+                    # If current lane doesn't belong to the first edge, reset
+                    if current_lane and first_edge and not str(current_lane).startswith(str(first_edge)+"_"):
+                        current_lane = None
+
+                    prev_lane = current_lane
+
+                    for idx, eid in enumerate(edge_ids):
+                        lane_id = None
+                        # Use current lane for the first edge, otherwise default to lane 0
+                        if idx == 0 and prev_lane and str(prev_lane).startswith(str(eid)+"_"):
+                            lane_id = prev_lane
+                        else:
+                            # pick rightmost/default lane 0
+                            try:
+                                lane_id = f"{eid}_0"
+                            except Exception:
+                                lane_id = None
+
+                        # Append lane shape
+                        try:
+                            if lane_id:
+                                shp = traci.lane.getShape(lane_id)
+                                for sx, sy in shp:
+                                    # Avoid duplicating last point
+                                    if coords and coords[-1][0] == float(sx) and coords[-1][1] == float(sy):
+                                        continue
+                                    coords.append([float(sx), float(sy)])
+                        except Exception:
+                            # Fallback to edge shape if lane shape unavailable
+                            try:
+                                shp = traci.edge.getShape(eid)
+                                for sx, sy in shp:
+                                    if coords and coords[-1][0] == float(sx) and coords[-1][1] == float(sy):
+                                        continue
+                                    coords.append([float(sx), float(sy)])
+                            except Exception:
+                                continue
+
+                    # Fallback: if we still have < 2 points, use current lane shape
+                    if len(coords) < 2:
+                        try:
+                            lane_id = traci.vehicle.getLaneID(vid)
+                            if lane_id:
+                                shp = traci.lane.getShape(lane_id)
+                                for sx, sy in shp:
+                                    coords.append([float(sx), float(sy)])
+                        except Exception:
+                            pass
+
+                    # Ensure at least a tiny segment so UI can render
+                    if len(coords) < 2:
+                        try:
+                            ang = float(traci.vehicle.getAngle(vid)) if hasattr(traci.vehicle, 'getAngle') else 0.0
+                        except Exception:
+                            ang = 0.0
+                        # project 5 meters ahead in heading (SUMO angle 0=east, 90=north)
+                        import math
+                        rad = math.radians(ang)
+                        coords.append([float(px + 5.0 * math.cos(rad)), float(py + 5.0 * math.sin(rad))])
+
+                    origin = { 'x': float(coords[0][0]), 'y': float(coords[0][1]) }
+                    dest = { 'x': float(coords[-1][0]), 'y': float(coords[-1][1]) }
+                    payload = {
+                        'type': 'route',
+                        'vehicleId': vid,
+                        'routeId': f'R-{vid}',
+                        'coords': coords,
+                        'origin': origin,
+                        'destination': dest,
+                        'ts': int(time.time()*1000)
+                    }
+                    print(json.dumps(payload)); sys.stdout.flush()
+                except Exception as e:
+                    print(json.dumps({"type":"log","level":"error","message":f"get_route failed: {e}"})); sys.stdout.flush();
                 return
                 
             tls_id_input = cmd.get('id')
