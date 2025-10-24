@@ -27,6 +27,7 @@ const TrafficMonitoring = () => {
   const [statusMsg, setStatusMsg] = useState("");
   const [liveStats, setLiveStats] = useState({ visibleVehicles: 0, avgSpeedMs: 0 });
   const [tlsModal, setTlsModal] = useState({ open: false, id: null, timing: {}, program: {}, currentPhase: null });
+  const handleStats = useCallback((s) => setLiveStats(s), []);
   const [clusterIds, setClusterIds] = useState([]);
   const [tlsByJunction, setTlsByJunction] = useState({}); // junctionId -> clusterId
   const socketRef = useRef(null);
@@ -459,7 +460,7 @@ const TrafficMonitoring = () => {
               <LiveIntersectionMap
                 intersectionId={filters.intersectionId}
                 paddingMeters={150}
-                onStats={(s) => setLiveStats(s)}
+                onStats={handleStats}
                 onTlsClick={(id, live) => setTlsModal({ open: true, id, timing: live?.timing || {}, program: live?.program || {}, currentPhase: { currentIndex: live?.timing?.currentIndex } })}
               />
             ) : (
