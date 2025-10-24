@@ -21,3 +21,8 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# WASM build artifacts
+wasm-parser/target/
+wasm-parser/pkg/
+wasm-parser/Cargo.lock

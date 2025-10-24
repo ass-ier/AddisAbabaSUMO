@@ -1,0 +1,6 @@
+/target
+/pkg
+Cargo.lock
+*.wasm
+*.js
+!build.ps1

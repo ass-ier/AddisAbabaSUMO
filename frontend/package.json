@@ -17,11 +17,14 @@
     "react-scripts": "5.0.1",
     "recharts": "^3.1.2",
     "socket.io-client": "^4.8.1",
+    "sumo-net-parser": "file:wasm-parser/pkg",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
     "start": "craco start",
-    "build": "craco build",
+    "build": "npm run build:wasm && craco build",
+    "build:wasm": "cd wasm-parser && powershell -File build.ps1",
+    "build:dev": "craco build",
     "test": "craco test",
     "test:coverage": "react-scripts test --coverage --watchAll=false",
     "eject": "react-scripts eject",

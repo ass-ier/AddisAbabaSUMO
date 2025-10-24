@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { MapContainer, Polyline, Polygon, CircleMarker, Marker, useMap } from "react-leaflet";
+import { MapContainer, Polyline, Polygon, CircleMarker, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import io from "socket.io-client";
 import { parseSumoNetXml } from "../utils/sumoNetParser";
 import { BASE_API } from "../utils/api";
+import { TrafficLightPhasePreview } from "./TrafficLightPhaseViz";
 import "leaflet/dist/leaflet.css";
 
 // Ensure default marker assets load if ever used
@@ -244,25 +245,34 @@ const LiveIntersectionMap = ({ intersectionId, paddingMeters = 120, height = 380
     return classes;
   }, [edgeGeoms, visible, viewBounds]);
 
-  // TLS icon similar to TrafficMap enhanced icon
-  const createEnhancedTlsIcon = (stateStr) => {
-    const s = String(stateStr || "").toLowerCase();
-    let red = 0, yellow = 0, green = 0;
-    for (const ch of s) {
-      if (ch === "r" || ch === "o") red += 1; else if (ch === "y") yellow += 1; else if (ch === "g") green += 1;
-    }
-    const total = Math.max(1, red + yellow + green);
-    const bar = (color, pct) => `<div style=\"height:4px;background:${color};width:${Math.max(8, Math.round(pct * 16))}px;border-radius:2px\"></div>`;
-    const html = `
-      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:2px 3px;background:rgba(0,0,0,0.55);border-radius:4px;color:#fff">
-        <div style="display:flex;gap:2px;align-items:center;justify-content:center">
-          ${bar("#D7263D", red/total)}
-          ${bar("#FFC107", yellow/total)}
-          ${bar("#25A244", green/total)}
-        </div>
-      </div>`;
-    return L.divIcon({ className: "tls-dynamic-icon", html, iconSize: [24, 20], iconAnchor: [12, 10] });
-  };
+// TLS icon identical to TrafficMap's enhanced icon
+const createEnhancedTlsIcon = (tlsData) => {
+  const state = tlsData?.state || "";
+  const size = 32;
+  const html = `
+    <div style="
+      width: ${size}px;
+      height: ${size}px;
+      background: linear-gradient(145deg, #2c3e50, #34495e);
+      border-radius: 6px;
+      border: 2px solid #fff;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.2s ease;
+    ">
+      <div style="width: 8px; height: 8px; border-radius: 50%; background: ${state.toLowerCase().includes("g") ? "#25A244" : "#666"}; margin: 1px 0; box-shadow: 0 0 3px rgba(0,0,0,0.5);"></div>
+      <div style="width: 8px; height: 8px; border-radius: 50%; background: ${state.toLowerCase().includes("y") ? "#FFC107" : "#666"}; margin: 1px 0; box-shadow: 0 0 3px rgba(0,0,0,0.5);"></div>
+      <div style="width: 8px; height: 8px; border-radius: 50%; background: ${state.toLowerCase().includes("r") ? "#D7263D" : "#666"}; margin: 1px 0; box-shadow: 0 0 3px rgba(0,0,0,0.5);"></div>
+      <div style="position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; background: #1976D2; border: 1px solid #fff; border-radius: 50%; font-size: 6px; color: white; display: flex; align-items: center; justify-content: center;">i</div>
+    </div>
+  `;
+  return L.divIcon({ className: "enhanced-tls-icon", html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+};
 
   const mapStyle = { height, width: "100%", borderRadius: 12, overflow: "hidden" };
 
@@ -328,7 +338,13 @@ const LiveIntersectionMap = ({ intersectionId, paddingMeters = 120, height = 380
             .filter((t) => withinBounds([t.lat, t.lng], viewBounds))
             .map((t) => {
               const live = tlsLiveMap.get(t.id) || {};
-              const icon = createEnhancedTlsIcon(live.state);
+              const icon = createEnhancedTlsIcon(live);
+              const fmt = (s) => {
+                const v = Math.max(0, Math.round(Number(s || 0)));
+                const m = Math.floor(v / 60);
+                const ss = v % 60;
+                return `${m}:${String(ss).padStart(2, "0")}`;
+              };
               return (
                 <Marker
                   key={`tls_${t.id}`}
@@ -339,7 +355,29 @@ const LiveIntersectionMap = ({ intersectionId, paddingMeters = 120, height = 380
                       if (typeof onTlsClick === "function") onTlsClick(t.id, live);
                     },
                   }}
-                />
+                >
+                  <Popup>
+                    <div>
+                      <div style={{ fontWeight: 700, marginBottom: 8 }}>TLS {t.id}</div>
+                      {live.state && (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>Current Phase State:</div>
+                          <TrafficLightPhasePreview phaseState={live.state} width={120} height={16} />
+                        </div>
+                      )}
+                      {typeof live?.timing?.currentIndex === "number" && (
+                        <div style={{ fontSize: 12, color: "#374151" }}>
+                          Phase {live.timing.currentIndex + 1}
+                          {typeof live?.timing?.remaining === "number" && (
+                            <span style={{ marginLeft: 8, fontWeight: 600, color: "#1976D2" }}>
+                              ({fmt(live.timing.remaining)} remaining)
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </Popup>
+                </Marker>
               );
             })}
 

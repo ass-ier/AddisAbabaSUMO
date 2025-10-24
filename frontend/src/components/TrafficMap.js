@@ -16,7 +16,7 @@ import "./TrafficMap.css";
 import io from "socket.io-client";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../utils/api";
-import { parseSumoNetXml } from "../utils/sumoNetParser";
+import { parseSumoNetXml } from "../utils/sumoNetParserWasm";
 import TrafficLightModal from "./TrafficLightModal";
 import { TrafficLightPhasePreview } from "./TrafficLightPhaseViz";
 // Optional clustering: keep footprint tiny without extra deps by grouping by grid
@@ -400,6 +400,33 @@ const TrafficMap = () => {
     }
     return batches;
   }, [sumoNetData.lanes]);
+
+  // Limit heavy junction rendering to avoid huge component trees in dev
+  const MAX_JUNCTION_POLYGONS = 3000;
+  const MAX_JUNCTION_POINTS = 5000;
+
+  // Batch junction polygons into MultiPolygons (greatly reduces component count)
+  const junctionPolysBatches = useMemo(() => {
+    const polys = Array.isArray(sumoNetData?.junctions)
+      ? sumoNetData.junctions.map((j) => j.polygon)
+      : [];
+    if (polys.length === 0) return [];
+    const limited = polys.slice(0, MAX_JUNCTION_POLYGONS);
+    const batchSize = 200; // MultiPolygon per batch (array of polygons)
+    const out = [];
+    for (let i = 0; i < limited.length; i += batchSize) {
+      out.push(limited.slice(i, i + batchSize));
+    }
+    return out;
+  }, [sumoNetData.junctions]);
+
+  // Cap junction center points (fallback fill)
+  const junctionPointsLimited = useMemo(() => {
+    const pts = Array.isArray(sumoNetData?.junctionPoints)
+      ? sumoNetData.junctionPoints
+      : [];
+    return pts.slice(0, MAX_JUNCTION_POINTS);
+  }, [sumoNetData.junctionPoints]);
 
   // Live congestion map per edge from vehicle count (with throttling)
   const [edgeCongestion, setEdgeCongestion] = useState(new Map()); // Use Map for better performance
@@ -1205,35 +1232,33 @@ const TrafficMap = () => {
             {/* Fit to network bounds on mount/update */}
             {sumoBounds && <FitBoundsController bounds={sumoBounds} />}
 
-            {/* Junction fill polygons (to cover intersection centers) */}
-            {Array.isArray(sumoNetData.junctions) &&
-              sumoNetData.junctions.map((j) => (
-                <Polygon
-                  key={`jpoly_${j.id}`}
-                  positions={j.polygon}
-                  pathOptions={{
-                    color: "#9ea3a8",
-                    weight: 0,
-                    fillColor: "#9ea3a8",
-                    fillOpacity: 0.95,
-                  }}
-                />
-              ))}
-            {/* Fallback: junction center disks to fill any remaining holes */}
-            {Array.isArray(sumoNetData.junctionPoints) &&
-              sumoNetData.junctionPoints.map((p) => (
-                <CircleMarker
-                  key={`jpt_${p.id}`}
-                  center={[p.lat, p.lng]}
-                  radius={6}
-                  pathOptions={{
-                    color: "#9ea3a8",
-                    weight: 0,
-                    fillColor: "#9ea3a8",
-                    fillOpacity: 0.95,
-                  }}
-                />
-              ))}
+            {/* Junction fill polygons (batched MultiPolygons) */}
+            {junctionPolysBatches.map((multi, idx) => (
+              <Polygon
+                key={`jpoly_batch_${idx}`}
+                positions={multi}
+                pathOptions={{
+                  color: "#9ea3a8",
+                  weight: 0,
+                  fillColor: "#9ea3a8",
+                  fillOpacity: 0.95,
+                }}
+              />
+            ))}
+            {/* Fallback: limited junction center disks to fill any remaining holes */}
+            {junctionPointsLimited.map((p) => (
+              <CircleMarker
+                key={`jpt_${p.id}`}
+                center={[p.lat, p.lng]}
+                radius={6}
+                pathOptions={{
+                  color: "#9ea3a8",
+                  weight: 0,
+                  fillColor: "#9ea3a8",
+                  fillOpacity: 0.95,
+                }}
+              />
+            ))}
 
             {/* Internal connectors first to close junction gaps */}
             {internalBatches.map((batch, idx) => (
