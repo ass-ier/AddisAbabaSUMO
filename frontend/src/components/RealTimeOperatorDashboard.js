@@ -150,7 +150,7 @@ const RealTimeOperatorDashboard = () => {
     },
     {
       title: "Average Speed",
-      value: `${Math.round(stats.averageSpeed)} km/h`,
+      value: `${Math.round((Number(stats.averageSpeed) || 0) * 3.6)} km/h`,
       change: connected ? "Live monitoring" : "+2.1 km/h improvement",
       icon: "⚡",
       status: "success",

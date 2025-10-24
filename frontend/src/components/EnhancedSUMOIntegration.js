@@ -1540,19 +1540,19 @@ const EnhancedSUMOIntegration = () => {
                       />
                     </div>
                     <div className="config-item">
-                      <label>Max Speed (m/s):</label>
+                      <label>Max Speed (km/h):</label>
                       <input
                         type="number"
-                        value={config.maxSpeed}
+                        value={(Number(config.maxSpeed) || 0) * 3.6}
                         onChange={(e) =>
                           handleConfigChange(
                             "maxSpeed",
-                            parseFloat(e.target.value)
+                            (Number(e.target.value) || 0) / 3.6
                           )
                         }
-                        step="0.1"
+                        step="1"
                         min="1"
-                        max="50"
+                        max="180"
                       />
                     </div>
                     <div className="config-item">

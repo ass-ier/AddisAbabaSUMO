@@ -54,7 +54,7 @@ const OperatorDashboard = () => {
     },
     {
       title: "Average Speed",
-      value: `${stats.averageSpeed} km/h`,
+      value: `${Math.round((Number(stats.averageSpeed) || 0) * 3.6)} km/h`,
       change: "+2.1 km/h improvement",
       icon: "⚡",
       status: "success",
