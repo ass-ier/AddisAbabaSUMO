@@ -157,41 +157,68 @@ export const parsePhaseStateToDirections = (state) => {
 };
 
 /**
- * Load and parse TLS configurations from the public .net.xml file
+ * Load and parse TLS configurations, preferring a lightweight phases XML if available
+ * Tries in order:
+ * 1) /Sumoconfigs/tls_phases.xml (custom lightweight file)
+ * 2) /Sumoconfigs/tls.xml (SUMO additional file with tlLogic only)
+ * 3) /Sumoconfigs/AddisAbaba.net.xml (full network)
+ * Results are memoized for the session to avoid repeated parsing.
  * @returns {Promise<Object>} - Promise resolving to TLS configurations
  */
+let __tlsConfigsCache = null;
+let __tlsConfigsPromise = null;
 export const loadTlsConfigurations = async () => {
-  try {
-    console.log(
-      "Loading TLS configurations from /Sumoconfigs/AddisAbaba.net.xml"
-    );
-    const response = await fetch("/Sumoconfigs/AddisAbaba.net.xml");
+  if (__tlsConfigsCache) return __tlsConfigsCache;
+  if (__tlsConfigsPromise) return __tlsConfigsPromise;
 
-    if (!response.ok) {
-      console.error(`HTTP Error: ${response.status} ${response.statusText}`);
-      throw new Error(
-        `Failed to load .net.xml: ${response.status} ${response.statusText}`
-      );
+  const candidates = [
+    "/Sumoconfigs/tls_phases.xml",
+    "/Sumoconfigs/tls.xml",
+    "/Sumoconfigs/AddisAbaba.net.xml",
+  ];
+
+  const tryFetch = async (url) => {
+    try {
+      const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const text = await res.text();
+      if (!text || !text.trim()) throw new Error("Empty response");
+      return text;
+    } catch (e) {
+      console.warn(`TLS config fetch failed for ${url}:`, e?.message || e);
+      return null;
     }
+  };
 
-    console.log("XML file loaded successfully, parsing content...");
-    const xmlContent = await response.text();
-
-    if (!xmlContent || xmlContent.trim().length === 0) {
-      throw new Error("XML file is empty or invalid");
+  __tlsConfigsPromise = (async () => {
+    for (const url of candidates) {
+      console.log(`Loading TLS configurations from ${url} ...`);
+      const xmlContent = await tryFetch(url);
+      if (!xmlContent) continue;
+      try {
+        const configs = parseTlsConfigurations(xmlContent);
+        console.log(
+          "TLS configurations parsed successfully:",
+          Object.keys(configs).length,
+          "traffic lights found (source:",
+          url,
+          ")"
+        );
+        __tlsConfigsCache = configs;
+        return configs;
+      } catch (parseErr) {
+        console.warn(`Failed parsing TLS XML from ${url}:`, parseErr?.message || parseErr);
+      }
     }
-
-    const configs = parseTlsConfigurations(xmlContent);
-    console.log(
-      "TLS configurations parsed successfully:",
-      Object.keys(configs).length,
-      "traffic lights found"
-    );
-    return configs;
-  } catch (error) {
-    console.error("Error loading TLS configurations:", error);
-    // Return empty config as fallback instead of throwing
+    console.error("Unable to load any TLS configuration source");
     return {};
+  })();
+
+  try {
+    const result = await __tlsConfigsPromise;
+    return result;
+  } finally {
+    __tlsConfigsPromise = null;
   }
 };
 

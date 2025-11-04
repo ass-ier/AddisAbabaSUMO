@@ -1541,6 +1541,8 @@ const TrafficMap = () => {
           onClose={handleModalClose}
           timing={getSelectedTlsData()?.timing}
           program={getSelectedTlsData()?.program}
+          currentState={getSelectedTlsData()?.state}
+          turns={getSelectedTlsData()?.turns}
         />
       )}
     </PageLayout>

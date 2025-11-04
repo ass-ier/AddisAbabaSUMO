@@ -1,5 +1,5 @@
 import React from "react";
-import { parsePhaseStateToDirections } from "../utils/tlsConfigParser";
+import { parsePhaseStateToDirections as __parsePhaseStateToDirections } from "../utils/tlsConfigParser";
 
 /**
  * Traffic Light Phase Visualization Component
@@ -11,8 +11,69 @@ const TrafficLightPhaseViz = ({
   showLabels = true,
   className = "",
   style = {},
+  turns = null,
 }) => {
-  const directions = parsePhaseStateToDirections(phaseState);
+  const safeParse = (state) => {
+    if (typeof __parsePhaseStateToDirections === 'function') {
+      return __parsePhaseStateToDirections(state);
+    }
+    // Fallback parser: all red if parser unavailable
+    const fallback = {
+      N: { L: "r", S: "r", R: "r" },
+      E: { L: "r", S: "r", R: "r" },
+      S: { L: "r", S: "r", R: "r" },
+      W: { L: "r", S: "r", R: "r" },
+    };
+    if (!state || state.length < 4) return fallback;
+    const chars = String(state).toLowerCase().split("");
+    if (chars.length >= 12) {
+      return {
+        N: { L: chars[0]||'r', S: chars[1]||'r', R: chars[2]||'r' },
+        E: { L: chars[3]||'r', S: chars[4]||'r', R: chars[5]||'r' },
+        S: { L: chars[6]||'r', S: chars[7]||'r', R: chars[8]||'r' },
+        W: { L: chars[9]||'r', S: chars[10]||'r', R: chars[11]||'r' },
+      };
+    } else if (chars.length >= 8) {
+      return {
+        N: { L: chars[1]||'r', S: chars[0]||'r', R: 'r' },
+        E: { L: chars[3]||'r', S: chars[2]||'r', R: 'r' },
+        S: { L: chars[5]||'r', S: chars[4]||'r', R: 'r' },
+        W: { L: chars[7]||'r', S: chars[6]||'r', R: 'r' },
+      };
+    } else {
+      return {
+        N: { L: 'r', S: chars[0]||'r', R: 'r' },
+        E: { L: 'r', S: chars[1]||'r', R: 'r' },
+        S: { L: 'r', S: chars[2]||'r', R: 'r' },
+        W: { L: 'r', S: chars[3]||'r', R: 'r' },
+      };
+    }
+  };
+  // If explicit turns mapping is provided, derive per-direction L/S/R from lane-based state string.
+  const directionsFromTurns = (state, t) => {
+    const base = { N: { L: 'r', S: 'r', R: 'r' }, E: { L: 'r', S: 'r', R: 'r' }, S: { L: 'r', S: 'r', R: 'r' }, W: { L: 'r', S: 'r', R: 'r' } };
+    if (!state || typeof state !== 'string' || !t || typeof t !== 'object') return base;
+    const chars = state.split('');
+    const pickColor = (indices) => {
+      const vals = (Array.isArray(indices) ? indices : [indices])
+        .map((i) => (typeof i === 'number' ? chars[i] : null))
+        .filter((c) => typeof c === 'string' && c.length > 0)
+        .map((c) => c.toLowerCase());
+      if (vals.some((c) => c === 'g')) return 'g';
+      if (vals.some((c) => c === 'y')) return 'y';
+      if (vals.some((c) => c === 'o')) return 'o';
+      return 'r';
+    };
+    const out = JSON.parse(JSON.stringify(base));
+    for (const dir of ['N','E','S','W']) {
+      const d = t[dir] || t[dir.toLowerCase()] || {};
+      out[dir].L = pickColor(d.L ?? d.l ?? []);
+      out[dir].S = pickColor(d.S ?? d.s ?? []);
+      out[dir].R = pickColor(d.R ?? d.r ?? []);
+    }
+    return out;
+  };
+  const directions = turns ? directionsFromTurns(phaseState, turns) : safeParse(phaseState);
 
   // Colors for different signal states
   const getSignalColor = (state) => {

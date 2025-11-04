@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from "react";
-import TrafficLightPhaseViz, {
-  TrafficLightPhasePreview,
-} from "./TrafficLightPhaseViz";
+import { TrafficLightPhasePreview } from "./TrafficLightPhaseViz";
 import {
   loadTlsConfigurations,
   getAvailablePhases,
@@ -23,6 +21,8 @@ const TrafficLightModal = ({
   nextPhase = null,
   timing = {},
   program = {},
+  currentState = undefined,
+  turns = undefined,
 }) => {
   const { user } = useAuth();
   const [tlsConfigs, setTlsConfigs] = useState({});
@@ -31,14 +31,17 @@ const TrafficLightModal = ({
   const [availablePhases, setAvailablePhases] = useState([]);
   const [error, setError] = useState(null);
   const [overrideActive, setOverrideActive] = useState(false);
+  // Local countdown that updates every second, independent of role
+  const [remainingCountdown, setRemainingCountdown] = useState(null);
 
   const canOverride = user && ["super_admin", "operator"].includes(user.role);
 
   // Format time in MM:SS format
   const formatTime = (seconds) => {
-    if (typeof seconds !== "number" || seconds < 0) return "--:--";
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
+    if (typeof seconds !== "number" || seconds === null) return "--:--";
+    const total = Math.max(0, Math.floor(seconds));
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
@@ -47,8 +50,13 @@ const TrafficLightModal = ({
     if (isOpen && tlsId) {
       // Reset override flag on open
       setOverrideActive(false);
-      loadTlsConfigurations()
-        .then((configs) => {
+      (async () => {
+        try {
+          const loader = loadTlsConfigurations;
+          if (typeof loader !== 'function') {
+            throw new Error('TLS config loader unavailable');
+          }
+          const configs = await loader();
           console.log("TLS configs loaded:", configs);
           setTlsConfigs(configs);
           const phases = getAvailablePhases(tlsId, configs);
@@ -59,8 +67,7 @@ const TrafficLightModal = ({
           if (Object.keys(configs).length > 0) {
             setError(null);
           }
-        })
-        .catch((err) => {
+        } catch (err) {
           console.error("Failed to load TLS configurations:", err);
           // Don't treat this as a fatal error - create fallback phases
           setError(
@@ -93,16 +100,53 @@ const TrafficLightModal = ({
 
           console.log("Using fallback phases:", fallbackPhases);
           setAvailablePhases(fallbackPhases);
-        });
+        }
+      })();
     }
   }, [isOpen, tlsId]);
 
-  // Update selected phase when current phase changes
+  // Derive current and next phase indices early for use in effects
+  const inferredCurrentIndex =
+    (typeof timing?.currentIndex === 'number')
+      ? timing.currentIndex
+      : ((typeof currentState === 'string' && Array.isArray(availablePhases))
+          ? (availablePhases.find((p) => p.state === currentState)?.index)
+          : undefined);
+
+  const computedNextIndex =
+    (typeof timing?.nextIndex === 'number')
+      ? timing.nextIndex
+      : ((typeof inferredCurrentIndex === 'number' && availablePhases.length > 0)
+          ? (inferredCurrentIndex + 1) % availablePhases.length
+          : undefined);
+
+  // Keep selected/highlighted phase in sync with live updates
   useEffect(() => {
-    if (typeof currentPhase?.currentIndex === "number") {
-      setSelectedPhase(currentPhase.currentIndex);
+    if (typeof timing?.currentIndex === "number") {
+      setSelectedPhase(timing.currentIndex);
+    } else if (typeof inferredCurrentIndex === 'number') {
+      setSelectedPhase(inferredCurrentIndex);
     }
-  }, [currentPhase]);
+  }, [timing?.currentIndex, inferredCurrentIndex]);
+
+  // Reset remaining countdown when timing.remaining changes or modal opens (only when provided)
+  useEffect(() => {
+    if (isOpen && typeof timing?.remaining === 'number') {
+      const start = Math.max(0, Math.floor(timing.remaining));
+      setRemainingCountdown(start);
+    } else if (isOpen) {
+      setRemainingCountdown(null);
+    }
+  }, [isOpen, timing?.remaining]);
+
+  // Tick countdown every second while open and we have remaining time
+  useEffect(() => {
+    if (!isOpen || typeof remainingCountdown !== 'number') return;
+    const id = setInterval(() => {
+      setRemainingCountdown((r) => (typeof r === 'number' && r > 0 ? r - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isOpen, remainingCountdown]);
 
   // Handle phase change
   const handlePhaseChange = async (phaseIndex) => {
@@ -129,8 +173,9 @@ const TrafficLightModal = ({
     try {
       // Safety: enforce all-yellow for ~3 seconds before switching to the chosen phase
       const inferLen = () => {
-        if (Array.isArray(program?.phases) && typeof currentPhaseIndex === 'number') {
-          const st = program.phases[currentPhaseIndex]?.state || '';
+        const idx = (typeof inferredCurrentIndex === 'number') ? inferredCurrentIndex : undefined;
+        if (Array.isArray(program?.phases) && typeof idx === 'number') {
+          const st = program.phases[idx]?.state || '';
           if (st.length > 0) return st.length;
         }
         if (Array.isArray(program?.phases) && program.phases.length > 0) {
@@ -255,13 +300,10 @@ const TrafficLightModal = ({
 
   if (!isOpen) return null;
 
-  const currentPhaseIndex = timing?.currentIndex;
-  const nextPhaseIndex = timing?.nextIndex;
-  const remainingTime = timing?.remaining;
   const currentPhaseData = availablePhases.find(
-    (p) => p.index === currentPhaseIndex
+    (p) => p.index === inferredCurrentIndex
   );
-  const nextPhaseData = availablePhases.find((p) => p.index === nextPhaseIndex);
+  const nextPhaseData = availablePhases.find((p) => p.index === computedNextIndex);
 
   return (
     <div className="modal-overlay" onClick={() => { if (!overrideActive) onClose(); }}>
@@ -294,8 +336,8 @@ const TrafficLightModal = ({
               <div className="status-item">
                 <label>Current Phase:</label>
                 <span className="phase-info">
-                  {typeof currentPhaseIndex === "number"
-                    ? `Phase ${currentPhaseIndex + 1}`
+                  {typeof inferredCurrentIndex === "number"
+                    ? `Phase ${inferredCurrentIndex + 1}`
                     : "Unknown"}
                   {currentPhaseData && (
                     <span className="phase-duration">
@@ -308,15 +350,15 @@ const TrafficLightModal = ({
               <div className="status-item">
                 <label>Time Remaining:</label>
                 <span className="time-remaining">
-                  {formatTime(remainingTime)}
+                  {formatTime(remainingCountdown)}
                 </span>
               </div>
 
               <div className="status-item">
                 <label>Next Phase:</label>
                 <span className="phase-info">
-                  {typeof nextPhaseIndex === "number"
-                    ? `Phase ${nextPhaseIndex + 1}`
+                  {typeof computedNextIndex === "number"
+                    ? `Phase ${computedNextIndex + 1}`
                     : "Unknown"}
                 </span>
               </div>
@@ -328,55 +370,44 @@ const TrafficLightModal = ({
             </div>
           </div>
 
-          {/* Phase Visualization */}
-          {currentPhaseData && (
-            <div className="visualization-section">
-              <h4>Current Phase Visualization</h4>
-              <div className="phase-viz-container">
-                <TrafficLightPhaseViz
-                  phaseState={currentPhaseData.state}
-                  size={280}
-                  showLabels={true}
-                />
-              </div>
-            </div>
-          )}
 
-          {/* Manual Control Section */}
-          {canOverride && availablePhases.length > 0 && (
-            <div className="control-section">
-              <h4>Manual Override</h4>
+          {/* Phases list (visible to all roles) */}
+          {availablePhases.length > 0 && (
+            <div className="phase-selection">
+              <h4>{canOverride ? 'Manual Override' : 'Available Phases'}</h4>
 
-              {/* Quick Controls */}
-              <div className="quick-controls">
-                <button
-                  className="control-btn prev-btn"
-                  onClick={handlePrevPhase}
-                  disabled={loading}
-                >
-                  ⬅ Previous Phase
-                </button>
-                <button
-                  className="control-btn next-btn"
-                  onClick={handleNextPhase}
-                  disabled={loading}
-                >
-                  Next Phase ➡
-                </button>
-              </div>
-
+              {/* Quick Controls (operators/admin only) */}
+              {canOverride && (
+                <div className="quick-controls">
+                  <button
+                    className="control-btn prev-btn"
+                    onClick={handlePrevPhase}
+                    disabled={loading}
+                  >
+                    ⬅ Previous Phase
+                  </button>
+                  <button
+                    className="control-btn next-btn"
+                    onClick={handleNextPhase}
+                    disabled={loading}
+                  >
+                    Next Phase ➡
+                  </button>
+                </div>
+              )}
 
               {/* Phase Selection Grid */}
               <div className="phase-selection">
-                <h5>Select Phase:</h5>
+                <h5>{canOverride ? 'Select Phase:' : 'Phases:'}</h5>
                 <div className="phase-grid">
                   {availablePhases.map((phase) => (
                     <div
                       key={phase.index}
                       className={`phase-card ${
-                        currentPhaseIndex === phase.index ? "active" : ""
-                      } ${selectedPhase === phase.index ? "selected" : ""}`}
-                      onClick={() => handlePhaseChange(phase.index)}
+                        inferredCurrentIndex === phase.index ? "active" : ""
+                      } ${selectedPhase === phase.index ? "selected" : ""} ${!canOverride ? "disabled" : ""}`}
+                      onClick={canOverride ? (() => handlePhaseChange(phase.index)) : undefined}
+                      title={canOverride ? '' : 'View only'}
                     >
                       <div className="phase-header">
                         <span className="phase-number">
@@ -403,7 +434,7 @@ const TrafficLightModal = ({
                         </div>
                       )}
 
-                      {currentPhaseIndex === phase.index && (
+                      {inferredCurrentIndex === phase.index && (
                         <div className="current-indicator">Current</div>
                       )}
                     </div>
@@ -411,12 +442,14 @@ const TrafficLightModal = ({
                 </div>
               </div>
 
-              {/* Warning Message */}
-              <div className="warning-message">
-                <strong>⚠ Warning:</strong> Manual override will interrupt the
-                normal traffic light cycle. Use with caution and only when
-                necessary.
-              </div>
+              {/* Warning Message (operators/admin only) */}
+              {canOverride && (
+                <div className="warning-message">
+                  <strong>⚠ Warning:</strong> Manual override will interrupt the
+                  normal traffic light cycle. Use with caution and only when
+                  necessary.
+                </div>
+              )}
             </div>
           )}
 
@@ -493,8 +526,9 @@ const TrafficLightModal = ({
                         setLoading(true);
                         // Determine length of state string to build all-yellow
                         const inferLen = () => {
-                          if (Array.isArray(program?.phases) && typeof currentPhaseIndex === 'number') {
-                            const st = program.phases[currentPhaseIndex]?.state || '';
+                          const idx = (typeof inferredCurrentIndex === 'number') ? inferredCurrentIndex : undefined;
+                          if (Array.isArray(program?.phases) && typeof idx === 'number') {
+                            const st = program.phases[idx]?.state || '';
                             if (st.length > 0) return st.length;
                           }
                           if (Array.isArray(program?.phases) && program.phases.length > 0) {

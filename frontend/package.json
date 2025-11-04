@@ -22,7 +22,7 @@
   },
   "scripts": {
     "start": "craco start",
-    "build": "npm run build:wasm && craco build",
+    "build": "npm run build:wasm && npm run generate:tls && craco build",
     "build:wasm": "cd wasm-parser && powershell -File build.ps1",
     "build:dev": "craco build",
     "test": "craco test --watchAll=false",
@@ -35,6 +35,7 @@
     "format": "prettier --write \"src/**/*.{js,jsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx,css,json}\"",
     "analyze": "source-map-explorer 'build/static/js/*.js'",
+    "generate:tls": "node scripts/generate_tls_phases_xml.cjs",
     "prepare": "husky"
   },
   "browserslist": {
